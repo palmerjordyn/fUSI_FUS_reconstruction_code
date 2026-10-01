@@ -36,6 +36,12 @@ def parse_arguments():
     )
 
     parser.add_argument(
+        "--date",
+        type=str,
+        default=None
+    )
+
+    parser.add_argument(
         "--rhs",
         type=str,
         default=None
@@ -95,6 +101,9 @@ def main():
 
     if args.acq is not None:
         env["FUS_ACQ"] = args.acq
+
+    if args.date is not None:
+        env["FUS_DATE"] = args.date
 
 
     if args.rhs is not None:
