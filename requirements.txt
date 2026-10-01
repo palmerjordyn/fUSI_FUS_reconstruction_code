@@ -1,0 +1,8 @@
+# Core scientific stack used throughout the analysis scripts
+numpy>=1.26,<3
+scipy>=1.11,<2
+matplotlib>=3.8,<4
+
+# Matplotlib's FFMpegWriter requires the ffmpeg executable to be installed and on PATH.
+# macOS: brew install ffmpeg
+# Ubuntu/Debian: sudo apt-get install ffmpeg
