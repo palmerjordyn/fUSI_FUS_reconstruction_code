@@ -6,11 +6,29 @@ This code reconstructs BF files from Hobbes into visual graphs/images.
 
 Two main options, see more details for each below:
 1) Obtain "theta_burst_10hz_anatomical_lgn_response_movie.mp4" and associated figures/data: run_all.py
-2) Generate example PD image to check acquisition validity: Generate_PD.py
+2) Generate example PD image to check acquisition validity, SNR and CNR: Generate_PD.py
 
-## Optional Installation of Virtual Environment
+## Software and Optional Installation of Virtual Environment
 
-Create and activate a virtual environment outside of folder created by GitHub (Requirements are fairly simple -see requirements.txt- so if they are already installed globally this isn't necessary):
+The following is necessary to run the code: 
+
+- Python 3.10 or newer
+- NumPy
+- SciPy
+- Matplotlib
+- OpenCV (`opencv-python`)
+- `imageio-ffmpeg`
+
+Either 
+1) Install missing packages with:
+
+```bash
+python3 -m pip install numpy scipy matplotlib opencv-python imageio-ffmpeg
+```
+    - I found that I had to 'brew install ffmpeg'
+OR
+
+2) Create and activate a virtual environment OUTSIDE of folder created by GitHub:
 
 ```bash
 python -m venv fUSI_FUS_venv
@@ -32,7 +50,7 @@ cd fUSI_FUS_code
 pip install -r requirements.txt
 ```
 
-## Option 1 steps: generating LGN fUSI video
+## Code 1 steps: generating LGN fUSI video
 1) edit config.py 
     - input date, data path, etc. Follow instructions in config.py
 2) run run_all.py
@@ -46,7 +64,7 @@ pip install -r requirements.txt
     All outputs will be sent to a folder "fUSI_FUS_output" which is in the same folder as fUSI_FUS_code. Reconstruction arrays will be under "reconstruction_10hz", videos will be under "ttl_aligned_10hz". Both these folders are under a folder titled BUTTER or SVD depending on the reconstruction type used. 
 4) If you want to know more about what is happening in each script run, see MORE INFORMATION section of this README.
 
-## Option 2 steps: generating PD images and estimating SNR, CNR
+## Code 2 steps: generating PD images and estimating SNR, CNR
 1) If you are on MATLAB, you can run "butterworth_power_doppler_roi.m", if using python you can run Generate_PD.py
 2) You only need to edit DATA_SOURCE (.zip or folder path), ACQUISITION, and BF_NUMBER
     - ex. 
@@ -60,7 +78,7 @@ pip install -r requirements.txt
 3) This will first show you the 8 PD images the BF file makes up (the 200 images are split up into sections of 25, each forming one PD image). Checking to see if the nerve is faintly visible around (300, 27) indicates if the acquisition is valid before further reconstruction is done. 
 4) Next you will be prompted in the terminal: "Enter ROI radius in pixels: ". Enter the radius of signal area you want to analyze (for the nerve 3 to 5 works). Then hit enter. An image should pop up of the first PD image. First select the center of your signal, then select an area of background noise. The code will report the SNR and CNR in dB in the terminal. A good run was found to have a SNR of 20dB and CNR of 5dB. 
 
-## MORE INFORMATION: WHAT IS THIS CODE DOING?
+## MORE INFORMATION: WHAT IS THIS CODE DOING? AND OTHER FILES
 1) parse_hobbes_design.py : Parses RHS files
     - produces `design/design_summary.json` which summarizes the fUSI and FUS triggers
     - This code ensures that the .rhs files match up with the BF data. 
@@ -93,3 +111,18 @@ This produces 10 Hz sampling during the approximately 800 ms acquisition burst. 
 
 6) "practice_analyze_singlepixel.py"
     - This code helps you analyze what is happening to a single pixel in one BF file (across all 200 images). You can select the pixel and BF file desired (perhaps use Generate_PD.py to determine which pixel you want to analyze). Graphs will demonstrate pixel signal in the time domain and frequency domain, the filter used and the post filtered frequency domain of the pixel. 
+
+7) "Generate_PD.m"
+    - Same thing as Generate_PD.py but works in MATLAB 
+
+8) "decode_itan_fusi_timing.py"
+    - Usually not ran, contains functions used by parse to understand the .rhs files. 
+
+9) "make_10hz_uncensored_movie.py"
+    - Allows you to change Z value that removes artifacts. For uncensored use CENSOR_Z = float("nan"), for Z = 4, use CENSOR_Z = float(4)
+
+10) "make_hobbes_design.py"
+    - Creates pdf and png traces that could be used in reports. 
+
+11) "plot_hobbes_anatomical_lgn_bar.py"
+    - anatomical-LGN whole-period bar plot.
