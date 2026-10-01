@@ -18,27 +18,16 @@ close all;
 
 
 %% ==================================================
-% DATA SOURCE
+% BF FILE PATH
 %
-% Set this to the folder containing the acquisition folders.
+% Set this to the complete path to the BF file.
 %
 % Example:
 %
-% DATA_SOURCE = "/Users/jpalmer/Downloads/HobbesFusiFUSAug312026";
+% bfPath = "/Users/jpalmer/Downloads/HobbesfusiFUSAug312026/Acq_2026_08_31_14_46_09/P7-4__BF_005.bin";
 % ==================================================
 
-DATA_SOURCE = "/Users/jpalmer/Downloads/HobbesFusiFUSAug312026";
-
-
-%% ==================================================
-% BF FILE
-%
-% Path relative to DATA_SOURCE.
-% ==================================================
-
-BF_FILE = fullfile( ...
-    "Acq_2026_08_31_14_46_09", ...
-    "P7-4__BF_005.bin");
+bfPath = "/Users/jpalmer/Downloads/HobbesfusiFUSAug312026/Acq_2026_08_31_14_46_09/P7-4__BF_005.bin";
 
 
 %% ==================================================
@@ -54,7 +43,6 @@ NT = 200;
 % Construct full BF file path
 % ==================================================
 
-bfPath = "/Users/jpalmer/Downloads/HobbesfusiFUSAug312026/Acq_2026_08_31_14_46_09/P7-4__BF_005.bin";
 
 if ~isfile(bfPath)
 
