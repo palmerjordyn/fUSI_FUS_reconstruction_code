@@ -31,9 +31,16 @@ OR
 2) Create and activate a virtual environment OUTSIDE of the folder created by GitHub (if in folder created by GitHub in terminal cd .. then run the following)
 
 ```bash
-python -m venv fUSI_FUS_venv
+python3 -m venv fUSI_FUS_venv
 
 source fUSI_FUS_venv/bin/activate
+```
+
+Install dependencies from github folder:
+
+```bash
+cd fUSI_FUS_reconstruction_code
+pip install -r requirements.txt
 ```
 
 If on MAC, may need to delete extra files made when copying from GitHub. If you don't, installing requirements won't work.
@@ -43,13 +50,10 @@ In directory outside of both GitHub and environment:
 find . -name '._*' -delete
 ```
 
-Install dependencies from github folder:
-
+After venv is created, it can be activated in a new terminal using 
 ```bash
-cd fUSI_FUS_code
-pip install -r requirements.txt
+source fUSI_FUS_venv/bin/activate
 ```
-After venv is created, it can be activated in a new terminal using source fUSI_FUS_venv/bin/activate
 
 ## Code 1 steps: generating LGN fUSI video
 1) edit config.py 
@@ -62,7 +66,7 @@ After venv is created, it can be activated in a new terminal using source fUSI_F
         "make_biomarker.py",
         "make_anatomical_lgn_movie.py",
 3) That should be all you have to do! The code will run and show updates in the terminal. 
-    All outputs will be sent to a folder "fUSI_FUS_output" which is in the same folder as fUSI_FUS_code. Reconstruction arrays will be under "reconstruction_10hz", videos will be under "ttl_aligned_10hz". Both these folders are under a folder titled BUTTER or SVD depending on the reconstruction type used. 
+    All outputs will be sent to a folder "fUSI_FUS_output" which is in the same folder as fUSI_FUS_reconstruction_code. Reconstruction arrays will be under "reconstruction_10hz", videos will be under "ttl_aligned_10hz". Both these folders are under a folder titled BUTTER or SVD depending on the reconstruction type used. 
 4) If you want to know more about what is happening in each script run, see MORE INFORMATION section of this README.
 
 ## Code 2 steps: generating PD images and estimating SNR, CNR
@@ -104,7 +108,7 @@ This produces 10 Hz sampling during the approximately 800 ms acquisition burst. 
     - This censor metric is a whole-image flash metric, not an LGN signal metric. The anatomical LGN occupies too few pixels to drive the field median.
 
 4) "make_biomarker.py" and "make_anatomical_lgn_movie.py"
-    - Uses files in fUSI_FUS_code/outputs to locate the lgn and create complete anatomical movie.
+    - Uses files in fUSI_FUS_reconstruction_code/outputs to locate the lgn and create complete anatomical movie.
     - make_biomarker.py looks for significant differences between the Contralateral and ipsilateral responses. If it can not find significant differences it will throw a warning but continue to make the video nonetheless. 
 
 5) "Generate_PD.py"
@@ -285,7 +289,7 @@ A useful setup on an Apple Silicon Mac is:
 fUSI_FUS_analysis/
 ├── fUSI_FUS_venv/          ← ARM64 environment
 ├── fUSI_FUS_venv_x86/      ← x86_64 environment for Intel MATLAB
-└── fUSI_FUS_code/
+└── fUSI_FUS_reconstruction_code/
 ```
 
 ---
@@ -373,7 +377,7 @@ Then:
 
 ```bash
 arch -x86_64 fUSI_FUS_venv_x86/bin/python \
-    -m pip install -r fUSI_FUS_code/requirements.txt
+    -m pip install -r fUSI_FUS_code_reconstruction/requirements.txt
 ```
 
 Verify NumPy and SciPy:
