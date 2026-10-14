@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import butter, lfilter
 from pathlib import Path
 import zipfile
+from matplotlib.widgets import Slider
 
 
 # ==================================================
@@ -14,14 +15,13 @@ import zipfile
 #   2. A folder containing the extracted data
 # ==================================================
 
-DATA_SOURCE = Path(
-    "/Users/jpalmer/Desktop/FUSI/HobbesfusiFUSAug312026.zip"
-)
-
+# DATA_SOURCE = Path(
+#     "/Users/jpalmer/Desktop/FUSI/HobbesfusiFUSAug312026.zip"
+# )
 # Example if using an extracted folder instead:
 #
 DATA_SOURCE = Path(
-    "/Users/jpalmer/Downloads/HobbesFusiFUSAug312026"
+    "/Users/jpalmer/Downloads/Hobbes Oct 5th 2026-selected"
 )
 
 
@@ -34,10 +34,17 @@ DATA_SOURCE = Path(
 # the first matching BF file.
 # ==================================================
 
-ACQUISITION = "Acq_2026_08_31_14_46_09"
+ACQUISITION = "Acq_2026_10_05_10_58_30"
 
-BF_NUMBER = 305
+BF_NUMBER = 31
 
+
+# ==================================================
+# Do you want to Save the images?
+# If true, fill out date
+# ==================================================
+Save = True
+DATE = "20261005"
 
 # ==================================================
 # Expected BF filename
@@ -47,14 +54,37 @@ BF_FILENAME = f"P7-4__BF_{BF_NUMBER:03d}.bin"
 
 
 # ==================================================
+# OUTPUT DIRECTORY
+# ==================================================
+
+CODE_DIR = Path(__file__).resolve().parent
+BASE_DIR = CODE_DIR.parent
+
+OUTPUT_DIR = (
+    BASE_DIR
+    / "fUSI_FUS_output"
+    / "PDs"
+)
+
+if Save:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+
+# ==================================================
 # Find BF file
 #
 # Searches recursively through the entire ZIP or
 # folder. The exact surrounding folder structure
 # does not matter.
 # ==================================================
+# ==================================================
+# FIND BF FILE
+# ==================================================
 
 def find_bf_file(data_source, acquisition, bf_filename):
+
+    matches = []
 
     # --------------------------------------------------
     # ZIP FILE
@@ -63,29 +93,25 @@ def find_bf_file(data_source, acquisition, bf_filename):
     if data_source.is_file() and data_source.suffix.lower() == ".zip":
 
         print(f"Reading from ZIP: {data_source}")
-        print(f"Searching for:")
-        print(f"  Acquisition: {acquisition}")
-        print(f"  BF file:     {bf_filename}")
+        print(f"Searching acquisition: {acquisition}")
+        print(f"Searching for BF file: {bf_filename}")
 
         with zipfile.ZipFile(data_source, "r") as z:
 
-            matches = []
-
             for name in z.namelist():
 
-                # Normalize path separators
-                normalized_name = name.replace("\\", "/")
+                normalized = name.replace("\\", "/")
+                parts = normalized.strip("/").split("/")
 
-                # Check that this is a file with the desired
-                # acquisition somewhere in its path and the
-                # desired BF filename at the end.
-                if (
-                    acquisition in normalized_name
-                    and normalized_name.endswith("/" + bf_filename)
-                ):
+                # Find the acquisition folder anywhere in the ZIP.
+                if acquisition not in parts:
+                    continue
+
+                # Match the BF filename at any nesting depth.
+                if parts[-1] == bf_filename:
                     matches.append(name)
 
-            if len(matches) == 0:
+            if not matches:
                 raise FileNotFoundError(
                     f"\nCould not find BF file.\n"
                     f"Acquisition: {acquisition}\n"
@@ -93,22 +119,20 @@ def find_bf_file(data_source, acquisition, bf_filename):
                     f"ZIP:         {data_source}"
                 )
 
-            # Use the first match
-            bf_file_zip = matches[0]
+            matches.sort()
 
             print("\nFound BF file:")
-            print(f"  {bf_file_zip}")
+            print(f"  {matches[0]}")
 
             if len(matches) > 1:
                 print(
-                    f"\nWarning: found {len(matches)} matching files."
+                    f"\nWarning: found {len(matches)} matching files. "
+                    "Using the first match."
                 )
-                print("Using the first match.")
 
-            raw = z.read(bf_file_zip)
+            raw = z.read(matches[0])
 
-            return raw, bf_file_zip
-
+            return raw, matches[0]
 
     # --------------------------------------------------
     # EXTRACTED FOLDER
@@ -117,46 +141,55 @@ def find_bf_file(data_source, acquisition, bf_filename):
     elif data_source.is_dir():
 
         print(f"Reading from folder: {data_source}")
-        print(f"Searching for:")
-        print(f"  Acquisition: {acquisition}")
-        print(f"  BF file:     {bf_filename}")
+        print(f"Searching acquisition: {acquisition}")
+        print(f"Searching for BF file: {bf_filename}")
 
-        matches = []
+        # Locate acquisition directories anywhere under DATA_SOURCE.
+        acquisition_dirs = [
+            path for path in data_source.rglob(acquisition)
+            if path.is_dir()
+        ]
 
-        # Recursive search through everything
-        # underneath DATA_SOURCE
-        for path in data_source.rglob(bf_filename):
+        # Also allow DATA_SOURCE itself to be the acquisition folder.
+        if data_source.name == acquisition:
+            acquisition_dirs.insert(0, data_source)
 
-            # Make sure the acquisition appears somewhere
-            # in the path
-            if acquisition in str(path):
-
-                matches.append(path)
-
-        if len(matches) == 0:
+        if not acquisition_dirs:
             raise FileNotFoundError(
-                f"\nCould not find BF file.\n"
+                f"\nCould not find acquisition folder.\n"
+                f"Acquisition: {acquisition}\n"
+                f"Folder:      {data_source}"
+            )
+
+        # Search recursively within every matching acquisition folder.
+        for acquisition_dir in acquisition_dirs:
+
+            for path in acquisition_dir.rglob(bf_filename):
+                if path.is_file():
+                    matches.append(path)
+
+        if not matches:
+            raise FileNotFoundError(
+                f"\nCould not find BF file inside the acquisition folder.\n"
                 f"Acquisition: {acquisition}\n"
                 f"BF file:     {bf_filename}\n"
                 f"Folder:      {data_source}"
             )
 
-        # Use the first match
-        bf_path = matches[0]
+        matches.sort(key=lambda path: str(path))
 
         print("\nFound BF file:")
-        print(f"  {bf_path}")
+        print(f"  {matches[0]}")
 
         if len(matches) > 1:
             print(
-                f"\nWarning: found {len(matches)} matching files."
+                f"\nWarning: found {len(matches)} matching files. "
+                "Using the first match."
             )
-            print("Using the first match.")
 
-        raw = bf_path.read_bytes()
+        raw = matches[0].read_bytes()
 
-        return raw, bf_path
-
+        return raw, matches[0]
 
     # --------------------------------------------------
     # INVALID DATA SOURCE
@@ -168,6 +201,35 @@ def find_bf_file(data_source, acquisition, bf_filename):
             f"DATA_SOURCE does not exist or is not a ZIP/folder:\n"
             f"{data_source}"
         )
+
+
+
+def select_point_on_axes(fig, ax, prompt):
+    """Select a point only when clicking inside the image axes."""
+    selected_point = []
+
+    print(prompt)
+
+    def on_click(event):
+        # Ignore slider clicks and clicks outside the image.
+        if event.inaxes is not ax:
+            return
+
+        if event.button == 1 and event.xdata is not None and event.ydata is not None:
+            selected_point.append((event.xdata, event.ydata))
+
+    callback_id = fig.canvas.mpl_connect("button_press_event", on_click)
+
+    try:
+        while not selected_point and plt.fignum_exists(fig.number):
+            plt.pause(0.05)
+    finally:
+        fig.canvas.mpl_disconnect(callback_id)
+
+    if not selected_point:
+        raise RuntimeError("Figure closed before a point was selected.")
+
+    return selected_point[0]
 
 
 # ==================================================
@@ -318,21 +380,29 @@ power_db = 10 * np.log10(
 
 
 # ==================================================
-# Display all 8 PD images
+# Display all 8 PD images with adjustable dB scale
 # ==================================================
 
 fig, axes = plt.subplots(
     1,
     8,
-    figsize=(14, 7),
-    constrained_layout=True
+    figsize=(14, 7)
 )
 
+# Leave room at the bottom for the slider
+fig.subplots_adjust(
+    bottom=0.22,
+    top=0.82,
+    wspace=0.35,
+    right=0.92
+)
 
-# Same dB scale for all 8 images
+# Initial brightness limits
 vmin = -40
 vmax = 0
 
+# Display all images using the same dB scale
+images = []
 
 for i, ax in enumerate(axes.flat):
 
@@ -344,37 +414,56 @@ for i, ax in enumerate(axes.flat):
         aspect="equal"
     )
 
+    images.append(im)
+
     ax.set_title(
-        f"PD {i + 1}  "
+        f"PD {i + 1} "
         f"(IQ frames {i * 25 + 1}–{(i + 1) * 25})"
     )
 
     ax.set_xlabel("X")
     ax.set_ylabel("Z")
 
-
-# ==================================================
-# Colorbar
-# ==================================================
-
-fig.colorbar(
-    im,
+# Add a colorbar
+cbar = fig.colorbar(
+    images[-1],
     ax=axes,
     label="Power (dB)"
 )
 
+# Add the brightness slider along the bottom of the figure
+slider_ax = fig.add_axes([0.20, 0.08, 0.60, 0.035])
 
+brightness_slider = Slider(
+    ax=slider_ax,
+    label="Lower dB bound",
+    valmin=-60,
+    valmax=-10,
+    valinit=-40,
+    valstep=1
+)
+
+# Update all images when the slider moves
+def update_brightness(value):
+
+    for im in images:
+        im.set_clim(
+            vmin=value,
+            vmax=0
+        )
+
+    fig.canvas.draw_idle()
+
+brightness_slider.on_changed(update_brightness)
+
+# Figure title
 fig.suptitle(
     f"{BF_FILENAME} — Butterworth High-Pass Power Doppler\n"
     f"{ACQUISITION}",
     fontsize=16
 )
 
-
-# ==================================================
-# Show all 8 PD images
-# ==================================================
-
+# Display the images without blocking the ROI workflow
 plt.show(block=False)
 
 
@@ -402,50 +491,104 @@ if radius <= 0:
     )
 
 
+
 # ==================================================
-# Open second window showing PD image 1
+# Individual PD image with its own brightness slider
 # ==================================================
 
-fig_roi, ax_roi = plt.subplots(
-    figsize=(7, 7)
-)
+fig_roi, ax_roi = plt.subplots(figsize=(7, 7))
 
-ax_roi.imshow(
-    power_db[0],
+# Leave room below the image for the slider.
+fig_roi.subplots_adjust(bottom=0.20)
+
+roi_image_index = 2  # 0 = PD 1, 1 = PD 2, etc.
+
+roi_image = ax_roi.imshow(
+    power_db[roi_image_index],
     cmap="gray",
     vmin=vmin,
-    vmax=vmax,
+    vmax=0,
     aspect="equal"
 )
 
 ax_roi.set_xlabel("X")
 ax_roi.set_ylabel("Z")
-
 ax_roi.set_title(
-    "PD 1 — Click center of SIGNAL ROI"
+    f"PD {roi_image_index + 1} — Click center of SIGNAL ROI"
 )
 
+# Slider axes
+roi_slider_ax = fig_roi.add_axes([0.20, 0.07, 0.65, 0.035])
+
+roi_brightness_slider = Slider(
+    ax=roi_slider_ax,
+    label="Lower dB bound",
+    valmin=-60,
+    valmax=-10,
+    valinit=vmin,
+    valstep=1
+)
+
+def update_roi_brightness(value):
+    roi_image.set_clim(vmin=value, vmax=0)
+    fig_roi.canvas.draw_idle()
+
+roi_brightness_slider.on_changed(update_roi_brightness)
+
 plt.show(block=False)
+
+
+
+# ==================================================
+# Helper: Select a point only inside the image axes
+# ==================================================
+
+def select_point_on_axes(fig, ax, prompt):
+    selected_point = []
+
+    print(prompt)
+
+    def on_click(event):
+        # Ignore clicks on the slider or anywhere outside the image.
+        if event.inaxes is not ax:
+            return
+
+        # Only accept left-clicks with valid image coordinates.
+        if (
+            event.button == 1
+            and event.xdata is not None
+            and event.ydata is not None
+        ):
+            selected_point.append((event.xdata, event.ydata))
+
+    callback_id = fig.canvas.mpl_connect(
+        "button_press_event",
+        on_click
+    )
+
+    try:
+        while not selected_point and plt.fignum_exists(fig.number):
+            plt.pause(0.05)
+    finally:
+        fig.canvas.mpl_disconnect(callback_id)
+
+    if not selected_point:
+        raise RuntimeError(
+            "Figure was closed before an ROI point was selected."
+        )
+
+    return selected_point[0]
 
 
 # ==================================================
 # Select SIGNAL ROI
 # ==================================================
 
-print("\nClick the center of the SIGNAL ROI.")
-
-signal_point = plt.ginput(
-    1,
-    timeout=-1
+signal_x, signal_z = select_point_on_axes(
+    fig_roi,
+    ax_roi,
+    "\nClick the center of the SIGNAL ROI inside the image."
 )
-
-if len(signal_point) == 0:
-
-    raise RuntimeError(
-        "No signal ROI was selected."
-    )
-
-signal_x, signal_z = signal_point[0]
 
 print(
     f"Signal ROI center: "
@@ -466,8 +609,7 @@ signal_circle = plt.Circle(
 )
 
 ax_roi.add_patch(signal_circle)
-
-fig_roi.canvas.draw()
+fig_roi.canvas.draw_idle()
 
 
 # ==================================================
@@ -475,25 +617,16 @@ fig_roi.canvas.draw()
 # ==================================================
 
 ax_roi.set_title(
-    "PD 1 — Click center of BACKGROUND ROI"
+    f"PD {roi_image_index + 1} — Click center of BACKGROUND ROI"
 )
 
-fig_roi.canvas.draw()
+fig_roi.canvas.draw_idle()
 
-print("\nClick the center of the BACKGROUND ROI.")
-
-background_point = plt.ginput(
-    1,
-    timeout=-1
+background_x, background_z = select_point_on_axes(
+    fig_roi,
+    ax_roi,
+    "\nClick the center of the BACKGROUND ROI inside the image."
 )
-
-if len(background_point) == 0:
-
-    raise RuntimeError(
-        "No background ROI was selected."
-    )
-
-background_x, background_z = background_point[0]
 
 print(
     f"Background ROI center: "
@@ -516,10 +649,10 @@ background_circle = plt.Circle(
 ax_roi.add_patch(background_circle)
 
 ax_roi.set_title(
-    "PD 1 — Signal and Background ROIs"
+    f"PD {roi_image_index + 1} — Signal and Background ROIs"
 )
 
-fig_roi.canvas.draw()
+fig_roi.canvas.draw_idle()
 
 
 # ==================================================
@@ -630,5 +763,91 @@ print("========================================")
 # ==================================================
 # Keep both windows open
 # ==================================================
+
+
+
+# ==================================================
+# SAVE INDIVIDUAL PD IMAGE
+# ==================================================
+
+if Save:
+
+    # Save the selected individual PD image at -60 to 0 dB.
+    save_fig, save_ax = plt.subplots(figsize=(7, 7))
+
+    save_ax.imshow(
+        power_db[roi_image_index],
+        cmap="gray",
+        vmin=-60,
+        vmax=0,
+        aspect="equal"
+    )
+
+    # # Draw the signal and background ROIs.
+    # save_ax.add_patch(
+    #     plt.Circle(
+    #         (signal_x, signal_z),
+    #         radius,
+    #         fill=False,
+    #         color="yellow",
+    #         linewidth=2,
+    #         label="Signal ROI"
+    #     )
+    # )
+
+    # save_ax.add_patch(
+    #     plt.Circle(
+    #         (background_x, background_z),
+    #         radius,
+    #         fill=False,
+    #         color="cyan",
+    #         linewidth=2,
+    #         label="Background ROI"
+    #     )
+    # )
+
+    save_ax.set_xlabel("X")
+    save_ax.set_ylabel("Z")
+
+    # Include the ROI statistics on the saved image.
+    save_ax.text(
+        0.2,
+        0.97,
+        f"SNR: {SNRdB:.3f} dB\nCNR: {CNRdB:.3f} dB",
+        transform=save_ax.transAxes,
+        va="top",
+        ha="left",
+        color="white",
+        fontsize=12,
+        bbox=dict(
+            facecolor="black",
+            alpha=0.75,
+            edgecolor="white"
+        )
+    )
+
+    save_ax.set_title(
+        f"PD {roi_image_index + 1} — {ACQUISITION}"
+    )
+
+    save_ax.legend(loc="lower right")
+
+    save_fig.tight_layout()
+
+    save_path = (
+        OUTPUT_DIR
+        / f"{DATE}_{ACQUISITION}.png"
+    )
+
+    save_fig.savefig(
+        save_path,
+        dpi=300,
+        bbox_inches="tight"
+    )
+
+    plt.close(save_fig)
+
+    print(f"\nSaved PD image: {save_path}")
+
 
 plt.show()

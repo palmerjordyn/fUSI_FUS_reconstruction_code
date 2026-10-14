@@ -1,3 +1,4 @@
+
 %% Butterworth High-Pass Power Doppler + ROI Analysis
 %
 % Reads a BF file from a normal folder path.
@@ -8,9 +9,13 @@
 %   3. Subtract first frame
 %   4. Apply Butterworth high-pass filter
 %   5. Generate 25-frame power-Doppler images
-%   6. Display all 8 PD images
-%   7. Select signal/background ROIs
-%   8. Calculate SNR and CNR
+%   6. Display all 8 PD images with adjustable dB slider
+%   7. Display an individual PD image with its own dB slider
+%   8. Select signal/background ROIs
+%   9. Calculate SNR and CNR
+%
+% The sliders change display contrast only.
+% SNR/CNR calculations use linear power values.
 
 clear;
 clc;
@@ -19,15 +24,9 @@ close all;
 
 %% ==================================================
 % BF FILE PATH
-%
-% Set this to the complete path to the BF file.
-%
-% Example:
-%
-% bfPath = "/Users/jpalmer/Downloads/HobbesfusiFUSAug312026/Acq_2026_08_31_14_46_09/P7-4__BF_005.bin";
 % ==================================================
 
-bfPath = "/Users/jpalmer/Downloads/HobbesfusiFUSAug312026/Acq_2026_08_31_14_46_09/P7-4__BF_005.bin";
+bfPath = "/Users/jpalmer/Downloads/Hobbes Oct 9th 2026/Acq_2026_10_09_12_12_53/P7-4__BF_214.bin";
 
 
 %% ==================================================
@@ -40,9 +39,8 @@ NT = 200;
 
 
 %% ==================================================
-% Construct full BF file path
+% Check BF file
 % ==================================================
-
 
 if ~isfile(bfPath)
 
@@ -65,11 +63,8 @@ if fid == -1
     error("Could not open BF file:\n%s", bfPath);
 end
 
-% Python dtype "<c16" consists of:
-%   64-bit little-endian real
-%   64-bit little-endian imaginary
-%
-% Read all values as doubles and reconstruct the complex samples.
+% Python dtype "<c16":
+% 64-bit little-endian real + 64-bit imaginary
 
 raw = fread(fid, Inf, "double=>double");
 
@@ -82,8 +77,7 @@ fclose(fid);
 
 if mod(numel(raw), 2) ~= 0
 
-    error( ...
-        "Binary file contains an odd number of double values.");
+    error("Binary file contains an odd number of double values.");
 
 end
 
@@ -91,29 +85,22 @@ data = complex( ...
     raw(1:2:end), ...
     raw(2:2:end));
 
-
 expected = NZ * NX * NT;
 
 if numel(data) ~= expected
 
     error( ...
         "Expected %d complex samples, but found %d.", ...
-        expected, ...
-        numel(data));
+        expected, numel(data));
 
 end
 
 
 %% ==================================================
 % Reshape into Z x X x time
-%
-% NumPy order='F' corresponds to MATLAB's native
-% column-major reshape ordering.
 % ==================================================
 
-cube = reshape( ...
-    data, ...
-    [NZ, NX, NT]);
+cube = reshape(data, [NZ, NX, NT]);
 
 fprintf( ...
     "Loaded cube: %d x %d x %d\n", ...
@@ -138,7 +125,6 @@ filterOrder = 4;
     cutoff / (fs / 2), ...
     "high");
 
-
 fprintf("\nButterworth filter coefficients:\n");
 
 disp("B =");
@@ -158,17 +144,7 @@ cube = cube - firstFrame;
 
 
 %% ==================================================
-% Apply Butterworth filter to every pixel
-%
-% Dimension 3 is the temporal/IQ dimension.
-%
-% This corresponds to:
-%
-% Python:
-% filtered = lfilter(B, A, cube, axis=2)
-%
-% MATLAB:
-% filtered = filter(B, A, cube, [], 3)
+% Apply Butterworth filter along time dimension
 % ==================================================
 
 filtered = filter( ...
@@ -177,7 +153,6 @@ filtered = filter( ...
     cube, ...
     [], ...
     3);
-
 
 fprintf( ...
     "Filtered cube: %d x %d x %d\n", ...
@@ -198,7 +173,6 @@ power_doppler = zeros( ...
     NX, ...
     "single");
 
-
 for i = 1:N_IMAGES
 
     startIdx = (i - 1) * WINDOW + 1;
@@ -211,7 +185,6 @@ for i = 1:N_IMAGES
         sum(abs(q).^2, 3));
 
 end
-
 
 fprintf( ...
     "Power Doppler shape: %d x %d x %d\n", ...
@@ -226,64 +199,97 @@ power_doppler_safe = max( ...
     power_doppler, ...
     single(1e-12));
 
-
 power_db = 10 * log10( ...
-    power_doppler_safe ./ ...
-    max(power_doppler_safe(:)));
+    power_doppler_safe ./ max(power_doppler_safe(:)));
 
 
 %% ==================================================
-% Display all 8 PD images
+% Display all PD images with adjustable dB slider
 % ==================================================
 
-figure( ...
-    "Name", ...
-    "Butterworth High-Pass Power Doppler");
+figAll = figure( ...
+    "Name", "All Power Doppler Images", ...
+    "Position", [50 200 1600 500]);
 
-
-tiledlayout( ...
-    1, ...
-    8, ...
+% Leave room at the bottom for the slider.
+tl = tiledlayout(figAll, 1, N_IMAGES, ...
     "TileSpacing", "compact", ...
     "Padding", "compact");
 
+tl.OuterPosition = [0.01 0.13 0.94 0.82];
 
-% Same dB scale for all 8 images
-vmin = -40;
+% Initial display limits.
+vmin = -60;
 vmax = 0;
 
+axAll = gobjects(1, N_IMAGES);
 
 for i = 1:N_IMAGES
 
-    nexttile;
+    axAll(i) = nexttile(tl);
 
     imagesc( ...
+        axAll(i), ...
         squeeze(power_db(i, :, :)), ...
         [vmin vmax]);
 
-    colormap(gray);
+    colormap(axAll(i), gray);
+    axis(axAll(i), "image");
 
-    axis image;
-
-    title(sprintf( ...
+    title(axAll(i), sprintf( ...
         "PD %d\n(IQ frames %d-%d)", ...
         i, ...
         (i - 1) * WINDOW + 1, ...
         i * WINDOW));
 
-    xlabel("X");
-    ylabel("Z");
+    xlabel(axAll(i), "X");
+    ylabel(axAll(i), "Z");
 
 end
 
-
-cb = colorbar;
-cb.Layout.Tile = "east";
+cb = colorbar(axAll(end));
 cb.Label.String = "Power (dB)";
+cb.Layout.Tile = "east";
+
+sgtitle(tl, "Butterworth High-Pass Power Doppler");
 
 
-sgtitle( ...
-    "BF_005 — Butterworth High-Pass Power Doppler");
+%% ==================================================
+% Slider for all 8 images
+% ==================================================
+
+dbLabelAll = uicontrol(figAll, ...
+    "Style", "text", ...
+    "Units", "normalized", ...
+    "Position", [0.10 0.045 0.20 0.045], ...
+    "String", sprintf("Lower dB limit: %d dB", vmin), ...
+    "FontSize", 11, ...
+    "BackgroundColor", get(figAll, "Color"));
+
+sliderAll = uicontrol(figAll, ...
+    "Style", "slider", ...
+    "Units", "normalized", ...
+    "Position", [0.32 0.05 0.48 0.04], ...
+    "Min", -80, ...
+    "Max", 0, ...
+    "Value", vmin, ...
+    "SliderStep", [1/80 5/80], ...
+    "Callback", @(src, evt) ...
+        updateDbLimit(src, axAll, dbLabelAll));
+
+uicontrol(figAll, ...
+    "Style", "text", ...
+    "Units", "normalized", ...
+    "Position", [0.25 0.045 0.07 0.045], ...
+    "String", "-80 dB", ...
+    "BackgroundColor", get(figAll, "Color"));
+
+uicontrol(figAll, ...
+    "Style", "text", ...
+    "Units", "normalized", ...
+    "Position", [0.80 0.045 0.06 0.045], ...
+    "String", "0 dB", ...
+    "BackgroundColor", get(figAll, "Color"));
 
 
 %% ==================================================
@@ -296,80 +302,130 @@ fprintf("========================================\n");
 
 
 %% ==================================================
-% Ask for ROI radius
+% Select ROI radius
 % ==================================================
 
-radius = input( ...
-    "\nEnter ROI radius in pixels: ");
+radius = input("\nEnter ROI radius in pixels: ");
 
+if isempty(radius) || ~isscalar(radius) || ...
+        ~isfinite(radius) || radius <= 0
 
-if isempty(radius) || radius <= 0
-
-    error( ...
-        "ROI radius must be greater than zero.");
+    error("ROI radius must be a positive number.");
 
 end
 
 
 %% ==================================================
-% Open second window showing PD image 1
+% Individual PD image with adjustable dB slider
 % ==================================================
 
-figure( ...
-    "Name", ...
-    "ROI Analysis");
+% Choose which PD image to display for ROI selection.
+roiImageIndex = 3;
 
+if roiImageIndex < 1 || roiImageIndex > N_IMAGES
+
+    error("roiImageIndex must be between 1 and %d.", N_IMAGES);
+
+end
+
+figROI = figure( ...
+    "Name", "Individual PD Image - ROI Analysis", ...
+    "Position", [250 100 750 750]);
+
+axROI = axes(figROI, ...
+    "Units", "normalized", ...
+    "Position", [0.12 0.20 0.78 0.72]);
 
 imagesc( ...
-    squeeze(power_db(1, :, :)), ...
+    axROI, ...
+    squeeze(power_db(roiImageIndex, :, :)), ...
     [vmin vmax]);
 
-colormap(gray);
+colormap(axROI, gray);
+axis(axROI, "image");
 
-axis image;
+xlabel(axROI, "X");
+ylabel(axROI, "Z");
 
-xlabel("X");
-ylabel("Z");
+title(axROI, sprintf( ...
+    "PD %d — Click center of SIGNAL ROI", ...
+    roiImageIndex));
 
-title( ...
-    "PD 1 — Click center of SIGNAL ROI");
+
+%% ==================================================
+% Slider for individual PD image
+% ==================================================
+
+dbLabelROI = uicontrol(figROI, ...
+    "Style", "text", ...
+    "Units", "normalized", ...
+    "Position", [0.10 0.105 0.40 0.045], ...
+    "String", sprintf("Lower dB limit: %d dB", vmin), ...
+    "FontSize", 11, ...
+    "BackgroundColor", get(figROI, "Color"));
+
+sliderROI = uicontrol(figROI, ...
+    "Style", "slider", ...
+    "Units", "normalized", ...
+    "Position", [0.12 0.065 0.76 0.04], ...
+    "Min", -80, ...
+    "Max", 0, ...
+    "Value", vmin, ...
+    "SliderStep", [1/80 5/80], ...
+    "Callback", @(src, evt) ...
+        updateDbLimit(src, axROI, dbLabelROI));
+
+uicontrol(figROI, ...
+    "Style", "text", ...
+    "Units", "normalized", ...
+    "Position", [0.02 0.06 0.09 0.045], ...
+    "String", "-80 dB", ...
+    "BackgroundColor", get(figROI, "Color"));
+
+uicontrol(figROI, ...
+    "Style", "text", ...
+    "Units", "normalized", ...
+    "Position", [0.88 0.06 0.09 0.045], ...
+    "String", "0 dB", ...
+    "BackgroundColor", get(figROI, "Color"));
+
+drawnow;
 
 
 %% ==================================================
 % Select SIGNAL ROI
 % ==================================================
 
-fprintf( ...
-    "\nClick the center of the SIGNAL ROI.\n");
+fprintf("\nAdjust the individual image dB slider if desired.\n");
+fprintf("Then click the center of the SIGNAL ROI.\n");
 
-[signal_x, signal_z] = ginput(1);
-
+[signal_x, signal_z] = selectImagePoint(axROI, ...
+    "Click the center of the SIGNAL ROI in the image.");
 
 if isempty(signal_x)
 
-    error( ...
-        "No signal ROI was selected.");
+    error("No signal ROI was selected.");
 
 end
 
-
 fprintf( ...
     "Signal ROI center: X = %.2f, Z = %.2f\n", ...
-    signal_x, ...
-    signal_z);
+    signal_x, signal_z);
 
 
 %% ==================================================
 % Draw SIGNAL ROI
 % ==================================================
 
-hold on;
+hold(axROI, "on");
 
 theta = linspace(0, 2*pi, 200);
 
 plot( ...
+    axROI, ...
     signal_x + radius*cos(theta), ...
     signal_z + radius*sin(theta), ...
+    "r-", ...
     "LineWidth", 2);
 
 
@@ -377,30 +433,26 @@ plot( ...
 % Select BACKGROUND ROI
 % ==================================================
 
-title( ...
-    "PD 1 — Click center of BACKGROUND ROI");
+title(axROI, sprintf( ...
+    "PD %d — Click center of BACKGROUND ROI", ...
+    roiImageIndex));
 
 drawnow;
 
-fprintf( ...
-    "\nClick the center of the BACKGROUND ROI.\n");
+fprintf("\nClick the center of the BACKGROUND ROI.\n");
 
-
-[background_x, background_z] = ginput(1);
-
+[background_x, background_z] = selectImagePoint(axROI, ...
+    "Click the center of the BACKGROUND ROI in the image.");
 
 if isempty(background_x)
 
-    error( ...
-        "No background ROI was selected.");
+    error("No background ROI was selected.");
 
 end
 
-
 fprintf( ...
     "Background ROI center: X = %.2f, Z = %.2f\n", ...
-    background_x, ...
-    background_z);
+    background_x, background_z);
 
 
 %% ==================================================
@@ -408,13 +460,15 @@ fprintf( ...
 % ==================================================
 
 plot( ...
+    axROI, ...
     background_x + radius*cos(theta), ...
     background_z + radius*sin(theta), ...
+    "y-", ...
     "LineWidth", 2);
 
-
-title( ...
-    "PD 1 — Signal and Background ROIs");
+title(axROI, sprintf( ...
+    "PD %d — Signal (red) and Background (yellow)", ...
+    roiImageIndex));
 
 drawnow;
 
@@ -427,11 +481,9 @@ drawnow;
     1:NX, ...
     1:NZ);
 
-
 signal_mask = ...
     (x_grid - signal_x).^2 + ...
     (z_grid - signal_z).^2 <= radius^2;
-
 
 background_mask = ...
     (x_grid - background_x).^2 + ...
@@ -441,49 +493,67 @@ background_mask = ...
 %% ==================================================
 % Extract signal and background values
 %
-% Use LINEAR power values for the statistics,
-% not the dB-converted image.
+% Use linear power values, not dB values.
+% Use the same PD image selected for ROI placement.
 % ==================================================
 
 PD1 = squeeze( ...
-    power_doppler(1, :, :));
+    power_doppler(roiImageIndex, :, :));
 
+signal_values = PD1(signal_mask);
 
-signal_values = ...
-    PD1(signal_mask);
-
-
-background_values = ...
-    PD1(background_mask);
+background_values = PD1(background_mask);
 
 
 %% ==================================================
 % Compute ROI statistics
 % ==================================================
 
+if isempty(signal_values) || isempty(background_values)
+
+    error("One of the ROIs contains no pixels.");
+
+end
+
 usignal = mean(signal_values);
-stdsignal = std(signal_values);
+stdsignal = std(double(signal_values));
 
 ubackground = mean(background_values);
-stdb = std(background_values);
+stdb = std(double(background_values));
 
 
 %% ==================================================
 % Compute SNR
 % ==================================================
 
-SNRdB = 20 * log10( ...
-    usignal / stdb);
+if stdb > 0 && usignal > 0
+
+    SNRdB = 20 * log10(usignal / stdb);
+
+else
+
+    SNRdB = NaN;
+
+end
 
 
 %% ==================================================
 % Compute CNR
 % ==================================================
 
-CNRdB = 20 * log10( ...
-    abs(usignal - ubackground) / ...
-    sqrt( ...
-        (stdsignal^2 + stdb^2) / 2));
+cnrDenominator = sqrt( ...
+    (stdsignal^2 + stdb^2) / 2);
+
+if cnrDenominator > 0
+
+    CNRdB = 20 * log10( ...
+        abs(usignal - ubackground) / cnrDenominator);
+
+else
+
+    CNRdB = NaN;
+
+end
 
 
 %% ==================================================
@@ -494,73 +564,33 @@ fprintf("\n========================================\n");
 fprintf("ROI RESULTS\n");
 fprintf("========================================\n");
 
+fprintf("\nPD image used: %d\n", roiImageIndex);
 
 fprintf("\nSignal ROI\n");
 fprintf("----------------------------------------\n");
 
-fprintf( ...
-    "Center X:      %.2f\n", ...
-    signal_x);
-
-fprintf( ...
-    "Center Z:      %.2f\n", ...
-    signal_z);
-
-fprintf( ...
-    "Radius:        %.2f pixels\n", ...
-    radius);
-
-fprintf( ...
-    "Pixels:        %d\n", ...
-    numel(signal_values));
-
-fprintf( ...
-    "Mean:          %.6g\n", ...
-    usignal);
-
-fprintf( ...
-    "Std:           %.6g\n", ...
-    stdsignal);
-
+fprintf("Center X:      %.2f\n", signal_x);
+fprintf("Center Z:      %.2f\n", signal_z);
+fprintf("Radius:        %.2f pixels\n", radius);
+fprintf("Pixels:        %d\n", numel(signal_values));
+fprintf("Mean:          %.6g\n", usignal);
+fprintf("Std:           %.6g\n", stdsignal);
 
 fprintf("\nBackground ROI\n");
 fprintf("----------------------------------------\n");
 
-fprintf( ...
-    "Center X:      %.2f\n", ...
-    background_x);
-
-fprintf( ...
-    "Center Z:      %.2f\n", ...
-    background_z);
-
-fprintf( ...
-    "Radius:        %.2f pixels\n", ...
-    radius);
-
-fprintf( ...
-    "Pixels:        %d\n", ...
-    numel(background_values));
-
-fprintf( ...
-    "Mean:          %.6g\n", ...
-    ubackground);
-
-fprintf( ...
-    "Std:           %.6g\n", ...
-    stdb);
-
+fprintf("Center X:      %.2f\n", background_x);
+fprintf("Center Z:      %.2f\n", background_z);
+fprintf("Radius:        %.2f pixels\n", radius);
+fprintf("Pixels:        %d\n", numel(background_values));
+fprintf("Mean:          %.6g\n", ubackground);
+fprintf("Std:           %.6g\n", stdb);
 
 fprintf("\nImage quality\n");
 fprintf("----------------------------------------\n");
 
-fprintf( ...
-    "SNR:           %.3f dB\n", ...
-    SNRdB);
-
-fprintf( ...
-    "CNR:           %.3f dB\n", ...
-    CNRdB);
+fprintf("SNR:           %.3f dB\n", SNRdB);
+fprintf("CNR:           %.3f dB\n", CNRdB);
 
 fprintf("========================================\n");
 
@@ -570,3 +600,93 @@ fprintf("========================================\n");
 % ==================================================
 
 drawnow;
+
+
+%% ==================================================
+% Local function: update dB display limit
+% ==================================================
+
+function updateDbLimit(src, ax, labelHandle)
+
+    lowerDb = round(get(src, "Value"));
+
+    % Update the display contrast without changing image data.
+    for k = 1:numel(ax)
+
+        if isgraphics(ax(k), "axes")
+
+            set(ax(k), "CLim", [lowerDb 0]);
+
+        end
+
+    end
+
+    % Update the text above the slider.
+    set(labelHandle, "String", ...
+        sprintf("Lower dB limit: %d dB", lowerDb));
+
+    drawnow limitrate;
+
+end
+
+
+
+
+%% ==================================================
+% Select a point only when the image axes are clicked
+% ==================================================
+
+function [x, z] = selectImagePoint(ax, prompt)
+
+    fig = ancestor(ax, "figure");
+
+    fprintf("%s\n", prompt);
+    title(ax, prompt);
+
+    x = [];
+    z = [];
+
+    % Wait for clicks until one lands inside the image axes.
+    while isempty(x)
+
+        % Wait for the next mouse click or key press.
+        waitforbuttonpress;
+
+        % Ignore keyboard presses.
+        if ~strcmp(get(fig, "SelectionType"), "normal")
+            continue;
+        end
+
+        % Identify the object under the mouse pointer.
+        clickedObject = hittest(fig);
+
+        % Ignore clicks on sliders, labels, buttons, etc.
+        clickedAxes = ancestor(clickedObject, "axes");
+
+        if isempty(clickedAxes) || ~isequal(clickedAxes, ax)
+            continue;
+        end
+
+        % Get image coordinates.
+        cp = get(ax, "CurrentPoint");
+
+        xClick = cp(1, 1);
+        zClick = cp(1, 2);
+
+        % Only accept clicks inside the image boundaries.
+        xLimits = xlim(ax);
+        zLimits = ylim(ax);
+
+        if xClick < min(xLimits) || xClick > max(xLimits) || ...
+           zClick < min(zLimits) || zClick > max(zLimits)
+            continue;
+        end
+
+        x = xClick;
+        z = zClick;
+
+    end
+
+    fprintf("Selected X = %.2f, Z = %.2f\n", x, z);
+
+end
