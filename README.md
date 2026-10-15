@@ -139,6 +139,12 @@ This produces 10 Hz sampling during the approximately 800 ms acquisition burst. 
     - run the code. 
     - If you are having issues with x86_64 vs arm64 then your matlab architecture does not match your python version architecture. Follow the instructions below in MATLAB and Python Architecture. 
 
+13) LightsReconCode/FusiOverlay.m
+    - used for Lights experiment recon. 
+    - add paths for required files. These files are found on BOX under functional ultrasound/ reconstruction code
+    - enter path to save to
+    - edit calvin and hobbes sections to add which acquisitions to analyze. 
+
 
 ## MATLAB and Python Architecture
 
