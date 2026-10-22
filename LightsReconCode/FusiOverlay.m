@@ -11,9 +11,14 @@
 % fUS_correlationZnorm.m.
 %
 % The Controls panel on the right runs analysis, switches session and
-% animal, and opens the summary figures. Arrow keys and W/A/S/D still
-% move the beam and the ultrasound image (hold Shift for smaller steps).
+% animal, and opens the summary figures. Up/Down arrows change the beam
+% angle and Left/Right arrows step through sagittal planes in the Beam Path
+% panel. W/A/S/D move the ultrasound image (hold Shift for smaller steps).
 % R and E rotate the image.
+%
+% Set fUSI = false in INPUTS to use this only for aligning the B-mode with
+% the MRI. No fUSI data is read or computed, and the fUSI panels, analysis
+% buttons and analysis hotkeys are turned off.
 %
 % COORDINATE SYSTEM (matches overlayUsFusi):
 %   X-axis  = lateral position (mm), centered on transducer
@@ -21,15 +26,44 @@
 
 clear; close all; clc;
 
+%% ==================== INPUTS ============================
+subject = {'Hobbes'};
+
+% fUSI = true : full pipeline (load fUSI, activation maps, analysis, fUSI overlays)
+% fUSI = false: B-mode / MRI alignment only. No fUSI data is read or computed and
+%               sessionDefs(i).fusiDir is ignored (it can be left empty).
+fUSI = false;
+
+% sessionDefs(1).bMDir   = '/Users/jpalmer/Downloads/12-10-10-16-26_Boltzmann';
+% sessionDefs(1).bMFile  = 'BMIQ_005';
+% sessionDefs(1).fusiDir = '/Users/jpalmer/Downloads/Hobbes Oct 5th 2026-selected/Acq_2026_10_05_10_58_30/Acq_2026_10_05_10_58_45';
+
+sessionDefs(1).bMDir   = '/Users/jpalmer/Downloads/Hobbes Oct 5th 2026-selected/10-55-10-05-26';
+sessionDefs(1).bMFile  = 'BMIQ_001';
+sessionDefs(1).fusiDir = '/Users/jpalmer/Downloads/Hobbes Oct 5th 2026-selected/Acq_2026_10_05_10_58_30/Acq_2026_10_05_10_58_45';
+
+
 %% ===================== SHARED SETTINGS =====================
 scriptDir = fileparts(mfilename('fullpath'));
-saveDir = '/System/Volumes/Data/v/raid1b/backup/jpalmer/FUS/fUSI_FUS_analysis/fUSI_FUS_output';
-%addpath('C:\Users\Carter\OneDrive\PhD Materials\Code\MUST')
-%addpath('C:\Users\Carter\OneDrive\PhD Materials\Code')
-%addpath('C:\Users\Carter\OneDrive\PhD Materials\Code\fusiLib')
+% --- Portable output location (no user-specific paths) ---
+% Expected folder layout, relative to wherever this script lives:
+%   <analysisRoot>/fUSI_FUS_reconstruction_code/LightsReconCode   <- this script
+%   <analysisRoot>/fUSI_FUS_output/LightsRecon                    <- saveDir
 
-addpath('/System/Volumes/Data/v/raid1b/backup/jpalmer/FUS/fUSI_FUS_analysis/Reconstruction Code-selected')
-addpath('/System/Volumes/Data/v/raid1b/backup/jpalmer/FUS/fUSI_FUS_analysis/Reconstruction Code-selected/MUST')
+reconCodeDir = fileparts(scriptDir);       % .../fUSI_FUS_reconstruction_code
+analysisRoot = fileparts(reconCodeDir);    % folder that holds both code and output
+[~, scriptFolderName] = fileparts(scriptDir);
+[~, reconFolderName]  = fileparts(reconCodeDir);
+if ~strcmp(scriptFolderName, 'LightsReconCode') || ~strcmp(reconFolderName, 'fUSI_FUS_reconstruction_code')
+    warning(['FusiOverlay.m is not inside fUSI_FUS_reconstruction_code/LightsReconCode.\n' ...
+             'Output folder will be created relative to: %s'], scriptDir);
+end
+
+saveDir = fullfile(analysisRoot, 'fUSI_FUS_output', 'LightsRecon');
+cacheDir = fullfile(saveDir, 'cache');     % precomputed MRI slices are stored here
+if ~isfolder(cacheDir), mkdir(cacheDir); end
+forceRecomputeMRI = false;                 % set true to ignore the cache and recompute
+
 
 % --- fUSI display (shared) ---
 fusiAlpha    = 0.5;
@@ -46,55 +80,21 @@ checkerBlockSize = 16;
 gridPad_mm = 20;           % Extra mm on each side so MRI fills view during shifts
 
 %% ===================== LOAD BOTH ANIMALS =====================
-%subjects = {'Calvin', 'Hobbes'};
-subjects = {'Hobbes'};
+%subjects = {'Calvin', 'Hobbes', 'Boltzmann'};
 animalStore = cell(1, 1);
 
 for iAnimal = 1:1
 
 
 %% ===================== SUBJECT PROFILES =====================
-subject = subjects{iAnimal};
-sessionDefs = struct('bMDir', {}, 'bMFile', {}, 'fusiDir', {});  % reset per animal
+subject = subject{iAnimal};
+%sessionDefs = struct('bMDir', {}, 'bMFile', {}, 'fusiDir', {});  % reset per animal
 
 switch subject
     case 'Calvin'
 
         % --- Per-session definitions (add rows for more sessions) ---
         %   Each session needs its own B-mode capture and fUSI directory.
-        
-         %sessionDefs(1).bMDir   = 'D:\fUS Data\Calvin July 13th 2026 2\15-34-07-13-26';
-         %sessionDefs(1).bMFile  = 'BMIQ_001';
-         %sessionDefs(1).fusiDir = 'D:\fUS Data\Calvin July 13th 2026 2\Acq_2026_07_13_15_37_08\Acq_2026_07_13_15_37_13\Acq_2026_07_13_15_41_32'; %excellent signal
-
-
-         %sessionDefs(2).bMDir = 'D:\fusFusiData\Calvin Lights Flashing Sept 22 2026\11-39-09-22-26';
-        %sessionDefs(2).bMFile   = 'BMIQ_001';
-        %sessionDefs(2).fusiDir  = 'D:\fusFusiData\Calvin Lights Flashing Sept 22 2026\Acq_2026_09_22_12_05_44\Acq_2026_09_22_12_06_01'; % second to last session . 3 degrees
-         % 
-         % sessionDefs(2).bMDir   = 'D:\fusFusiData\Calvin August 21st 2026 Lights onoff\13-58-08-21-26';
-         % sessionDefs(2).bMFile  = 'BMIQ_001';
-         % sessionDefs(2).fusiDir = 'D:\fusFusiData\Calvin August 21st 2026 Lights onoff\Acq_2026_08_21_14_02_29\Acq_2026_08_21_14_04_04\Acq_2026_08_21_14_08_10'; % bad signal overall
-
-        %  sessionDefs(3).bMDir   = 'D:\fusFusiData\Calvin August 21st 2026 Lights onoff\14-17-08-21-26';
-        %  sessionDefs(3).bMFile  = 'BMIQ_001';
-        %  sessionDefs(3).fusiDir = 'D:\fusFusiData\Calvin August 21st 2026 Lights onoff\Acq_2026_08_21_14_20_04\Acq_2026_08_21_14_20_12\Acq_2026_08_21_14_24_20'; %poor but some activation near LGN
-        % 
-        %  sessionDefs(4).bMDir   = 'D:\fusFusiData\Calvin August 21st 2026 Lights onoff\14-31-08-21-26';
-        %  sessionDefs(4).bMFile  = 'BMIQ_001';
-        %  sessionDefs(4).fusiDir = 'D:\fusFusiData\Calvin August 21st 2026 Lights onoff\Acq_2026_08_21_14_34_38\Acq_2026_08_21_14_34_49\Acq_2026_08_21_14_38_59'; % bad signal at depth
-        % 
-        % sessionDefs(5).bMDir   = 'D:\fusFusiData\Calvin September 1st 2026\14-24-09-01-26';
-        % sessionDefs(5).bMFile  = 'BMIQ_001';
-        % sessionDefs(5).fusiDir = 'D:\fusFusiData\Calvin September 1st 2026\Acq_2026_09_01_14_30_50\Acq_2026_09_01_14_31_21\Acq_2026_09_01_14_35_36'; 
-        % 
-        %  sessionDefs(6).bMDir   = 'D:\fusFusiData\Calvin September 1st 2026\15-05-09-01-26';
-        %  sessionDefs(6).bMFile  = 'BMIQ_001';
-        %  sessionDefs(6).fusiDir = 'D:\fusFusiData\Calvin September 1st 2026\Acq_2026_09_01_14_52_02\Acq_2026_09_01_14_52_14\Acq_2026_09_01_14_56_28'; % some LGN activation 
-        % 
-        %  sessionDefs(7).bMDir   = 'D:\fusFusiData\Calvin September 1st 2026\15-18-09-01-26';
-        %  sessionDefs(7).bMFile  = 'BMIQ_001';
-        %  sessionDefs(7).fusiDir = 'D:\fusFusiData\Calvin September 1st 2026\Acq_2026_09_01_15_07_22\Acq_2026_09_01_15_07_45\Acq_2026_09_01_15_12_01'; 
 
 
         mrilogFile = fullfile(scriptDir, 'CalvinMRI.mat');
@@ -224,6 +224,70 @@ switch subject
         intanAccelCh  = 1;
         intanFs       = 20000;
 
+    case 'Boltzmann'
+        % --- Paths ---
+
+        % --- Per-session definitions (add rows for more sessions) ---
+%          sessionDefs(1).bMDir   = '/Users/jpalmer/Downloads/12-10-10-16-26_Boltzmann';
+%          sessionDefs(1).bMFile  = 'BMIQ_005';
+%          sessionDefs(1).fusiDir = '/Users/jpalmer/Downloads/Hobbes Oct 5th 2026-selected/Acq_2026_10_05_10_58_30/Acq_2026_10_05_10_58_45';
+
+        mrilogFile = fullfile(scriptDir, 'BoltzmannMRI.mat');
+    
+        % --- B-mode scan geometry (phased array) ---
+        faceWidth_mm = 12;
+        fovWidth_mm  = 120;
+        fovDepth_mm  = 80;
+        dynRange_dB  = 60;
+    
+        % --- Beam / transducer positioning ---
+        yCenter    = 40.05e-3;    % +10mm Y from original 30.05e-3
+        depthParam = 0.012;
+        zDistAdj   = 0.007;       % +10mm Z offset
+        angles     = 34:0.5:56;
+    
+        % --- B-mode orientation corrections ---
+        doRot180_US = false;
+        flipLR_US   = true;
+        flipUD_US   = false;
+    
+        % --- Initial B-mode overlay offset (WASD/R/E adjustments, default for all sessions) ---
+        bm_dx_init   = 9.5;
+        bm_dz_init   = 9.5;
+        bm_rot_init  = 7.0;
+        defaultAngle = 52;
+    
+        % --- fUSI display options ---
+        fusiFrameIdx   = 0;
+        fusiXOffset_mm = 0;
+    
+        % --- fUSI analysis parameters ---
+        stim.zscore     = 1.65;
+        stim.isSmooth   = false;
+        stim.smoothN    = 2;
+        stim.actPeriod  = 10;
+        stim.restPeriod = 10;
+        stim.numAct     = 15;
+        %stim.numAct     = 11;
+    
+        stim.stimFirst  = false;
+    
+        % --- Transducer face marker ---
+        txMarkerThick_mm = 1.5;
+        txFaceOffset_mm  = 7;
+    
+        % --- Epoch plot labels ---
+        epochTitlePrefix = 'fUSI Neurovascular Response';
+        subjectLabel     = 'Subject H';
+    
+        % --- Intan EEG / Accelerometer (optional) ---
+        %intanPath     = 'D:\fusFusiData\April 14th Hobbes Pilot\HobbesPilot300FramesLED\';
+        intanPath = '';
+        intanBaseName = {''};
+        %intanBaseName = {'HobbesPilot300FrameLED_260414_'};
+        intanAccelCh  = 1;
+        intanFs       = 20000;
+
     otherwise
         error('Unknown subject "%s". Use ''Calvin'' or ''Hobbes''.', subject);
 end
@@ -254,133 +318,197 @@ x_out_mm = -(fovWidth_mm/2 + gridPad_mm) : pxSize_mm : (fovWidth_mm/2 + gridPad_
 z_out_mm = -(txMarkerThick_mm + gridPad_mm) : pxSize_mm : (fovDepth_mm + gridPad_mm);
 [X_OUT, Z_OUT] = meshgrid(x_out_mm, z_out_mm);
 
-%% ===================== PRECOMPUTE MRI SLICES =====================
+%% ===================== PRECOMPUTE MRI SLICES (CACHED) =====================
+% The MRI oblique slices and the sagittal beam-path masks are slow to build
+% (interp3 + 3-D masks for every angle). They are computed once, saved in
+% <saveDir>/cache, and reloaded on later runs. The cache is rebuilt
+% automatically if the MRI file or any geometry setting below changes.
 nAngles = numel(angles);
-[Ymr, Xmr, Zmr] = meshgrid(sys.uy, sys.ux, sys.uz);
- 
 hasLGN = isfield(sys, 'leftLgnRoi') && isfield(sys, 'rightLgnRoi');
-if hasLGN, lgnVolume = sys.leftLgnRoi + sys.rightLgnRoi; end
- 
-mrSlices  = cell(nAngles, 1);
-mrNorms   = cell(nAngles, 1);
-lgnSlices = cell(nAngles, 1);
-faceY_mm  = zeros(nAngles, 1);
-faceZ_mm  = zeros(nAngles, 1);
- 
-X_mr_base = X_OUT * 1e-3;
- 
-fprintf('Precomputing MRI slices for %d angles...\n', nAngles);
-for ai = 1:nAngles
-    th = deg2rad(angles(ai));
-    zF = zDist_eff + depthParam * cos(th);
-    yF = yCenter   - depthParam * sin(th);
-    faceY_mm(ai) = yF * 1e3;
-    faceZ_mm(ai) = zF * 1e3;
- 
-    Z_mr_q = zF + Z_OUT * 1e-3 * cos(th);
-    Y_mr_q = yF - Z_OUT * 1e-3 * sin(th);
- 
-    mr = interp3(Ymr, Xmr, Zmr, sys.aImg, Y_mr_q, X_mr_base, Z_mr_q, 'linear', NaN);
-    mrSlices{ai} = mr;
- 
-    mrN = mr; vpMR = ~isnan(mrN);
-    if any(vpMR(:))
-        lo = min(mrN(vpMR)); hi = max(mrN(vpMR));
-        if hi > lo, mrN = (mrN - lo) / (hi - lo); end
-        mrN(isnan(mrN)) = 0;
-    else
-        mrN = zeros(size(mr));
-    end
-    mrNorms{ai} = mrN;
- 
-    if hasLGN
-        lgnSlices{ai} = interp3(Ymr, Xmr, Zmr, lgnVolume, Y_mr_q, X_mr_base, Z_mr_q, 'linear', NaN);
-    end
 
-    % DEBUG: At theta=53 deg, find depths where the slice ACTUALLY contains LGN
-    if angles(ai) == 53 && hasLGN
-        lgn = lgnSlices{ai}; lgn(isnan(lgn)) = 0;
-        [rows_with_lgn, ~] = find(lgn > 0.1);
-        if ~isempty(rows_with_lgn)
-            uniq_rows = unique(rows_with_lgn);
-            fprintf('DEBUG theta=53: LGN appears at coronal depths:\n');
-            for rr = uniq_rows(:)'
-                fprintf('  z_out=%.2fmm -> queries (uy=%.2f, uz=%.2f) mm\n', ...
-                    z_out_mm(rr), Y_mr_q(rr,1)*1e3, Z_mr_q(rr,1)*1e3);
-            end
-        else
-            fprintf('DEBUG theta=53: NO LGN voxels found in slice\n');
-        end
-    end
-
-    % DEBUG: At theta=50 deg, print where the coronal queries at depth=50mm
-    if angles(ai) == 50
-        [~, depth_row] = min(abs(z_out_mm - 50));
-        fprintf('DEBUG theta=50, depth=50mm: queries sys.uy=%.2fmm, sys.uz=%.2fmm (display Z=%.2fmm)\n', ...
-            Y_mr_q(depth_row, 1)*1e3, Z_mr_q(depth_row, 1)*1e3, ...
-            Z_mr_q(depth_row, 1)*1e3 - zDist_eff*1e3 - depthParam*cos(deg2rad(mean(angles)))*1e3);
-    end
-    if mod(ai, 5) == 0, fprintf('  %d/%d done\n', ai, nAngles); end
-end
-fprintf('Done.\n');
-
-%% ===================== PRECOMPUTE SAGITTAL BEAM PATH =====================
-% (Ported from overlayUsFusi subplot 1: sagittal MRI with beam overlay)
-fprintf('Precomputing sagittal beam path data...\n');
-
-% Transducer geometry for beam column visualization
+% Sagittal beam column geometry (needed whether or not the cache is used)
 txHeight_sag = 0.003;           % Beam column thickness (m)
 txWidth_sag  = 0.015;           % Transducer lateral width (m)
 
-% Find midline x-index for sagittal slice extraction
-[~, centerIdxX] = min(abs(sys.ux));
+mriInfo = dir(mrilogFile);
+cacheSig = struct( ...
+    'cacheVersion',     1, ...
+    'subject',          subject, ...
+    'mriFileBytes',     mriInfo.bytes, ...
+    'mriFileDate',      mriInfo.datenum, ...
+    'angles',           angles, ...
+    'zDistAdj',         zDistAdj, ...
+    'depthParam',       depthParam, ...
+    'yCenter',          yCenter, ...
+    'fovWidth_mm',      fovWidth_mm, ...
+    'fovDepth_mm',      fovDepth_mm, ...
+    'gridPad_mm',       gridPad_mm, ...
+    'txMarkerThick_mm', txMarkerThick_mm, ...
+    'txHeight_sag',     txHeight_sag, ...
+    'txWidth_sag',      txWidth_sag, ...
+    'gridSize',         [numel(z_out_mm), numel(x_out_mm)], ...
+    'hasLGN',           hasLGN);
+cacheFile = fullfile(cacheDir, sprintf('%s_MRIslices_cache.mat', subject));
 
-% Extract sagittal (Y-Z) slice at midline
-tmpYimg = squeeze(sys.aImg(centerIdxX,:,:)).';
-tmpYimg(end-5:end, end-9:end) = max(tmpYimg(:));  % Reference marker
-
-% Fixed transducer face Z-position (using mean angle as reference)
-refTheta_sag = deg2rad(mean(angles));
-zFace_sag    = depthParam * cos(refTheta_sag) + zDist_eff;
-[~, zFaceIdx] = min(abs(zFace_sag - sys.uz));
-
-% Precompute per-angle beam overlays and face positions
-beamOverlay = cell(nAngles, 1);
-sagFacePos  = zeros(nAngles, 2);   % [Y, Z] in mm relative to face
-
-for ai = 1:nAngles
-    theta = deg2rad(angles(ai));
-
-    % Beam path mask on 3D MR grid
-    Zoff = Zmr - zDist_eff;
-    Yoff = Ymr - yCenter;
-    txColumn = zeros(size(sys.aImg));
-    txColumn(Xmr < txWidth_sag/2 & Xmr > -txWidth_sag/2 & ...
-        Zoff < -Yoff/tan(theta) + txHeight_sag/2 & Zoff > -Yoff/tan(theta) - txHeight_sag/2 & ...
-        Yoff < -tan(theta)*Zoff + txHeight_sag/2 & Yoff > -tan(theta)*Zoff - txHeight_sag/2) = 1;
-
-    % Extract midline sagittal slice of beam mask
-    beamOverlay{ai} = squeeze(txColumn(centerIdxX,:,:)).';
-
-    % Face center position in mm (Z relative to face)
-    sagFacePos(ai,:) = [(yCenter - depthParam*sin(theta))*1e3, ...
-                        (zDist_eff + depthParam*cos(theta))*1e3 - zFace_sag*1e3];
+cacheHit = false;
+if ~forceRecomputeMRI && isfile(cacheFile)
+    try
+        hdr = load(cacheFile, 'cacheSig');
+        if isequal(hdr.cacheSig, cacheSig)
+            fprintf('Loading cached MRI slices from %s ...\n', cacheFile);
+            C = load(cacheFile);
+            mrSlices      = C.mrSlices;
+            lgnSlices     = C.lgnSlices;
+            faceY_mm      = C.faceY_mm;
+            faceZ_mm      = C.faceZ_mm;
+            tmpYimg       = C.tmpYimg;
+            beamOverlay   = C.beamOverlay;
+            sagFacePos    = C.sagFacePos;
+            sagSysUy_mm   = C.sagSysUy_mm;
+            sagSysUz_mm   = C.sagSysUz_mm;
+            sagPivotY_mm  = C.sagPivotY_mm;
+            sagPivotZ_mm  = C.sagPivotZ_mm;
+            mrNorms = cellfun(@normalizeMriSlice, mrSlices, 'UniformOutput', false);
+            clear C hdr
+            cacheHit = true;
+            fprintf('Done (cache hit).\n');
+        else
+            fprintf('MRI cache is out of date (MRI file or geometry changed). Recomputing...\n');
+        end
+    catch ME
+        warning('Could not read MRI cache (%s). Recomputing...', ME.message);
+        cacheHit = false;
+    end
 end
 
-sagSysUy_mm   = sys.uy * 1e3;
-sagSysUz_mm   = sys.uz * 1e3 - zFace_sag * 1e3;
-sagPivotY_mm  = yCenter * 1e3;
-sagPivotZ_mm  = zDist_eff * 1e3 - zFace_sag * 1e3;
-fprintf('Done.\n');
+if ~cacheHit
+    [Ymr, Xmr, Zmr] = meshgrid(sys.uy, sys.ux, sys.uz);
+ 
+    if hasLGN, lgnVolume = sys.leftLgnRoi + sys.rightLgnRoi; end
+ 
+    mrSlices  = cell(nAngles, 1);
+    mrNorms   = cell(nAngles, 1);
+    lgnSlices = cell(nAngles, 1);
+    faceY_mm  = zeros(nAngles, 1);
+    faceZ_mm  = zeros(nAngles, 1);
+ 
+    X_mr_base = X_OUT * 1e-3;
+ 
+    fprintf('Precomputing MRI slices for %d angles...\n', nAngles);
+    for ai = 1:nAngles
+        th = deg2rad(angles(ai));
+        zF = zDist_eff + depthParam * cos(th);
+        yF = yCenter   - depthParam * sin(th);
+        faceY_mm(ai) = yF * 1e3;
+        faceZ_mm(ai) = zF * 1e3;
+ 
+        Z_mr_q = zF + Z_OUT * 1e-3 * cos(th);
+        Y_mr_q = yF - Z_OUT * 1e-3 * sin(th);
+ 
+        mr = interp3(Ymr, Xmr, Zmr, sys.aImg, Y_mr_q, X_mr_base, Z_mr_q, 'linear', NaN);
+        mrSlices{ai} = mr;
+ 
+        mrNorms{ai} = normalizeMriSlice(mr);
+ 
+        if hasLGN
+            lgnSlices{ai} = interp3(Ymr, Xmr, Zmr, lgnVolume, Y_mr_q, X_mr_base, Z_mr_q, 'linear', NaN);
+        end
+
+        % DEBUG: At theta=53 deg, find depths where the slice ACTUALLY contains LGN
+        if angles(ai) == 53 && hasLGN
+            lgn = lgnSlices{ai}; lgn(isnan(lgn)) = 0;
+            [rows_with_lgn, ~] = find(lgn > 0.1);
+            if ~isempty(rows_with_lgn)
+                uniq_rows = unique(rows_with_lgn);
+                fprintf('DEBUG theta=53: LGN appears at coronal depths:\n');
+                for rr = uniq_rows(:)'
+                    fprintf('  z_out=%.2fmm -> queries (uy=%.2f, uz=%.2f) mm\n', ...
+                        z_out_mm(rr), Y_mr_q(rr,1)*1e3, Z_mr_q(rr,1)*1e3);
+                end
+            else
+                fprintf('DEBUG theta=53: NO LGN voxels found in slice\n');
+            end
+        end
+
+        % DEBUG: At theta=50 deg, print where the coronal queries at depth=50mm
+        if angles(ai) == 50
+            [~, depth_row] = min(abs(z_out_mm - 50));
+            fprintf('DEBUG theta=50, depth=50mm: queries sys.uy=%.2fmm, sys.uz=%.2fmm (display Z=%.2fmm)\n', ...
+                Y_mr_q(depth_row, 1)*1e3, Z_mr_q(depth_row, 1)*1e3, ...
+                Z_mr_q(depth_row, 1)*1e3 - zDist_eff*1e3 - depthParam*cos(deg2rad(mean(angles)))*1e3);
+        end
+        if mod(ai, 5) == 0, fprintf('  %d/%d done\n', ai, nAngles); end
+    end
+    fprintf('Done.\n');
+
+    %% ===================== PRECOMPUTE SAGITTAL BEAM PATH =====================
+    % (Ported from overlayUsFusi subplot 1: sagittal MRI with beam overlay)
+    fprintf('Precomputing sagittal beam path data...\n');
+
+    % Transducer geometry for beam column visualization
+
+    % Find midline x-index for sagittal slice extraction
+    [~, centerIdxX] = min(abs(sys.ux));
+
+    % Extract sagittal (Y-Z) slice at midline
+    tmpYimg = squeeze(sys.aImg(centerIdxX,:,:)).';
+    tmpYimg(end-5:end, end-9:end) = max(tmpYimg(:));  % Reference marker
+
+    % Fixed transducer face Z-position (using mean angle as reference)
+    refTheta_sag = deg2rad(mean(angles));
+    zFace_sag    = depthParam * cos(refTheta_sag) + zDist_eff;
+    [~, zFaceIdx] = min(abs(zFace_sag - sys.uz));
+
+    % Precompute per-angle beam overlays and face positions
+    beamOverlay = cell(nAngles, 1);
+    sagFacePos  = zeros(nAngles, 2);   % [Y, Z] in mm relative to face
+
+    for ai = 1:nAngles
+        theta = deg2rad(angles(ai));
+
+        % Beam path mask on 3D MR grid
+        Zoff = Zmr - zDist_eff;
+        Yoff = Ymr - yCenter;
+        txColumn = zeros(size(sys.aImg));
+        txColumn(Xmr < txWidth_sag/2 & Xmr > -txWidth_sag/2 & ...
+            Zoff < -Yoff/tan(theta) + txHeight_sag/2 & Zoff > -Yoff/tan(theta) - txHeight_sag/2 & ...
+            Yoff < -tan(theta)*Zoff + txHeight_sag/2 & Yoff > -tan(theta)*Zoff - txHeight_sag/2) = 1;
+
+        % Extract midline sagittal slice of beam mask
+        beamOverlay{ai} = squeeze(txColumn(centerIdxX,:,:)).';
+
+        % Face center position in mm (Z relative to face)
+        sagFacePos(ai,:) = [(yCenter - depthParam*sin(theta))*1e3, ...
+                            (zDist_eff + depthParam*cos(theta))*1e3 - zFace_sag*1e3];
+    end
+
+    sagSysUy_mm   = sys.uy * 1e3;
+    sagSysUz_mm   = sys.uz * 1e3 - zFace_sag * 1e3;
+    sagPivotY_mm  = yCenter * 1e3;
+    sagPivotZ_mm  = zDist_eff * 1e3 - zFace_sag * 1e3;
+    fprintf('Done.\n');
+
+    % ---- Save cache for next time ----
+    fprintf('Saving MRI slice cache to %s ...\n', cacheFile);
+    try
+        save(cacheFile, 'cacheSig', 'mrSlices', 'lgnSlices', 'faceY_mm', 'faceZ_mm', ...
+            'tmpYimg', 'beamOverlay', 'sagFacePos', 'sagSysUy_mm', 'sagSysUz_mm', ...
+            'sagPivotY_mm', 'sagPivotZ_mm', '-v7.3');
+        fprintf('Cache saved.\n');
+    catch ME
+        warning('Could not save MRI cache (%s). It will be recomputed next run.', ME.message);
+    end
+end  % if ~cacheHit
 
 %% ===================== LOAD ALL SESSIONS (B-mode + fUSI + activation) =====================
 % Per-session storage
 sess = struct();
+fusi_xaxis_mm = [];  fusi_zaxis_mm = [];   % filled in below when fUSI = true
 for iSess = 1:nSessions
     sd = sessionDefs(iSess);
     fprintf('\n--- Session %d/%d ---\n', iSess, nSessions);
     fprintf('  B-mode: %s\n', sd.bMDir);
-    fprintf('  fUSI:   %s\n', sd.fusiDir);
+    if fUSI, fprintf('  fUSI:   %s\n', sd.fusiDir); end
 
     if ~isempty(sd.bMDir) && exist(sd.bMDir, 'dir'), addpath(sd.bMDir); end
 
@@ -444,134 +572,141 @@ for iSess = 1:nSessions
     bmNorm(~sectorMask) = 0;
     clear bmImg bmMaskRaw bmMaskResampled
 
-    % ---- Load fUSI ----
-    fprintf('  Loading fUSI data from %s...\n', sd.fusiDir);
-    SeqParamPath = dir(fullfile(sd.fusiDir, 'SequenceParam*'));
-    SP = load(fullfile(sd.fusiDir, SeqParamPath(1).name));
+    if fUSI
+        % ---- Load fUSI ----
+        fprintf('  Loading fUSI data from %s...\n', sd.fusiDir);
+        SeqParamPath = dir(fullfile(sd.fusiDir, 'SequenceParam*'));
+        SP = load(fullfile(sd.fusiDir, SeqParamPath(1).name));
 
-    fusi_Nz_sess = SP.CParam.PData.Size(1);
-    fusi_Nx_sess = SP.CParam.PData.Size(2);
-    fusi_Nframes_sess = SP.UserParam.NumLoops + 1;
+        fusi_Nz_sess = SP.CParam.PData.Size(1);
+        fusi_Nx_sess = SP.CParam.PData.Size(2);
+        fusi_Nframes_sess = SP.UserParam.NumLoops + 1;
 
-    if iSess == 1
-        fusi_Nz = fusi_Nz_sess;
-        fusi_Nx = fusi_Nx_sess;
-        fusi_maxDepth_mm = fusi_Nz * SP.CParam.PData.PDelta(3) * SP.UserParam.CenterWavelength * 1e3;
-        fusi_z0_mm = SP.CParam.PData.Origin(3) * SP.UserParam.CenterWavelength * 1e3;
-        fusi_zaxis_mm = linspace(fusi_z0_mm, fusi_z0_mm + fusi_maxDepth_mm, fusi_Nz);
-        fusi_x0_mm = SP.CParam.PData.Origin(1) * SP.UserParam.CenterWavelength * 1e3;
-        fusi_xaxis_mm = (1:fusi_Nx) .* SP.CParam.PData.PDelta(1) .* SP.UserParam.CenterWavelength * 1e3;
-        fusi_xaxis_mm = fusi_xaxis_mm + fusi_x0_mm + fusiXOffset_mm;
-        fprintf('  fUSI grid: %d x %d (origin: x=%.1f mm, z=%.1f mm)\n', ...
-            fusi_Nz, fusi_Nx, fusi_x0_mm, fusi_z0_mm);
+        if iSess == 1
+            fusi_Nz = fusi_Nz_sess;
+            fusi_Nx = fusi_Nx_sess;
+            fusi_maxDepth_mm = fusi_Nz * SP.CParam.PData.PDelta(3) * SP.UserParam.CenterWavelength * 1e3;
+            fusi_z0_mm = SP.CParam.PData.Origin(3) * SP.UserParam.CenterWavelength * 1e3;
+            fusi_zaxis_mm = linspace(fusi_z0_mm, fusi_z0_mm + fusi_maxDepth_mm, fusi_Nz);
+            fusi_x0_mm = SP.CParam.PData.Origin(1) * SP.UserParam.CenterWavelength * 1e3;
+            fusi_xaxis_mm = (1:fusi_Nx) .* SP.CParam.PData.PDelta(1) .* SP.UserParam.CenterWavelength * 1e3;
+            fusi_xaxis_mm = fusi_xaxis_mm + fusi_x0_mm + fusiXOffset_mm;
+            fprintf('  fUSI grid: %d x %d (origin: x=%.1f mm, z=%.1f mm)\n', ...
+                fusi_Nz, fusi_Nx, fusi_x0_mm, fusi_z0_mm);
+        else
+            if fusi_Nz_sess ~= fusi_Nz || fusi_Nx_sess ~= fusi_Nx
+                warning('Session %d grid (%dx%d) differs from session 1 (%dx%d). Using session 1 grid.', ...
+                    iSess, fusi_Nz_sess, fusi_Nx_sess, fusi_Nz, fusi_Nx);
+            end
+        end
+
+        fprintf('  Session %d: %d frames\n', iSess, fusi_Nframes_sess);
+
+        dopFile = fullfile(sd.fusiDir, 'Dop.bin');
+        if ~isfile(dopFile)
+            fprintf('  Dop.bin not found. Generating it from beamformed data...\n');
+            generateDopBin(sd.fusiDir);
+        end
+
+        DopSess = readBinFile(dopFile, ...
+            [fusi_Nz_sess, fusi_Nx_sess, fusi_Nframes_sess], 'double');
+
+        nExpected = stim.numAct * (stim.restPeriod + stim.actPeriod);
+        if fusi_Nframes_sess > nExpected
+            fprintf('  Trimming %d -> %d frames (discarding %d extra)\n', ...
+                fusi_Nframes_sess, nExpected, fusi_Nframes_sess - nExpected);
+            DopSess = DopSess(:, :, 1:nExpected);
+            fusi_Nframes_sess = nExpected;
+        end
+
+        if doRot180_US, DopSess = rot90(DopSess, 2); end
+        if flipLR_US
+            for fi = 1:fusi_Nframes_sess, DopSess(:,:,fi) = fliplr(DopSess(:,:,fi)); end
+        end
+        if flipUD_US
+            for fi = 1:fusi_Nframes_sess, DopSess(:,:,fi) = flipud(DopSess(:,:,fi)); end
+        end
+        clear SP SeqParamPath
+
+        % Build stim pattern for this session
+        stimPattern_sess = -ones(1, fusi_Nframes_sess);
+        stimOn_sess = (0:stim.numAct-1)' .* (stim.restPeriod + stim.actPeriod) + stim.restPeriod + (1:stim.actPeriod);
+        stimOn_sess = stimOn_sess(:);
+        stimOn_sess(stimOn_sess > fusi_Nframes_sess) = [];
+        stimPattern_sess(stimOn_sess) = 1;
+        if stim.stimFirst, stimPattern_sess = -stimPattern_sess; end
+        stimPatternNorm_sess = (stimPattern_sess - mean(stimPattern_sess)) ./ std(stimPattern_sess, 1);
+
+        % ---- Resample fUSI (display frame from this session) ----
+        fprintf('  Resampling fUSI onto output grid...\n');
+        fusi_Nframes_s = size(DopSess, 3);
+        if fusiFrameIdx == 0
+            dopFrame = mean(DopSess, 3);
+        else
+            dopFrame = DopSess(:, :, min(fusiFrameIdx, fusi_Nframes_s));
+        end
+
+        [Xf, Zf] = meshgrid(fusi_xaxis_mm, fusi_zaxis_mm);
+        fusiResampled = interp2(Xf, Zf, dopFrame, X_OUT, Z_OUT, 'linear', NaN);
+        fusiMask = ~isnan(fusiResampled) & Z_OUT >= 0;
+
+        fusiNorm = fusiResampled;
+        fusiNorm(~fusiMask) = 0;
+        vpF = fusiMask;
+        if any(vpF(:))
+            fusiNorm = sqrt(abs(fusiNorm));
+            lo = min(fusiNorm(vpF)); hi = max(fusiNorm(vpF));
+            if hi > lo, fusiNorm = (fusiNorm - lo) / (hi - lo); end
+        end
+        fusiNorm(~fusiMask) = 0;
+
+        % ---- Compute activation map for this session ----
+        fprintf('  Computing activation map...\n');
+        DopSmooth = DopSess;
+        if stim.isSmooth
+            fprintf('    Spatial smoothing (kernel=%d)...\n', stim.smoothN);
+            for t = 1:fusi_Nframes_s
+                DopSmooth(:,:,t) = imfilter(DopSmooth(:,:,t), ones(stim.smoothN)/stim.smoothN^2);
+            end
+        end
+
+        dopMeanAll = mean(DopSmooth, 3, 'omitnan');
+        stdDopAll  = std(DopSmooth, 1, 3, 'omitnan');
+        stdDopAll(stdDopAll == 0) = 1;
+        dopNormAll = (DopSmooth - dopMeanAll) ./ stdDopAll;
+
+        ActMap_sess = zeros(fusi_Nz, fusi_Nx);
+        for i = 1:fusi_Nz
+            for ii = 1:fusi_Nx
+                tmp = corrcoef(squeeze(dopNormAll(i, ii, :)), stimPatternNorm_sess(:));
+                ActMap_sess(i, ii) = tmp(1, 2);
+            end
+        end
+        actThreshold_sess = stim.zscore * std(ActMap_sess(:), 'omitnan') + mean(ActMap_sess(:), 'omitnan');
+        actSigMaskNative_sess = ActMap_sess > actThreshold_sess;
+
+        % Resample activation onto output grid
+        actResampled = interp2(Xf, Zf, ActMap_sess, X_OUT, Z_OUT, 'linear', NaN);
+        actSigResampled = interp2(Xf, Zf, double(actSigMaskNative_sess), X_OUT, Z_OUT, 'nearest', 0) > 0.5;
+        actMaskGrid = ~isnan(actResampled) & Z_OUT >= 0;
+
+        actNormGrid = actResampled;
+        actNormGrid(actNormGrid < 0) = 0;
+        actNormGrid(~actMaskGrid) = 0;
+        hiAct = max(actNormGrid(:));
+        if hiAct > 0, actNormGrid = actNormGrid / hiAct; end
+
+        corrRawGrid = actResampled;
+        corrRawGrid(~actMaskGrid) = 0;
+
+        fprintf('  Activation map: %d significant pixels\n', sum(actSigMaskNative_sess(:)));
+        clear DopSmooth dopNormAll dopMeanAll stdDopAll dopFrame fusiResampled actResampled
     else
-        if fusi_Nz_sess ~= fusi_Nz || fusi_Nx_sess ~= fusi_Nx
-            warning('Session %d grid (%dx%d) differs from session 1 (%dx%d). Using session 1 grid.', ...
-                iSess, fusi_Nz_sess, fusi_Nx_sess, fusi_Nz, fusi_Nx);
-        end
+        % B-mode / MRI alignment only: no fUSI data is read or computed
+        fusiNorm = [];  fusiMask = [];  DopSess = [];
+        actNormGrid = [];  corrRawGrid = [];  actSigResampled = [];  actMaskGrid = [];
+        ActMap_sess = [];  actThreshold_sess = [];  stimPatternNorm_sess = [];
     end
-
-    fprintf('  Session %d: %d frames\n', iSess, fusi_Nframes_sess);
-
-    dopFile = fullfile(sd.fusiDir, 'Dop.bin');
-    if ~isfile(dopFile)
-        fprintf('  Dop.bin not found. Generating it from beamformed data...\n');
-        generateDopBin2(sd.fusiDir);
-    end
-
-    DopSess = readBinFile(dopFile, ...
-        [fusi_Nz_sess, fusi_Nx_sess, fusi_Nframes_sess], 'double');
-
-    nExpected = stim.numAct * (stim.restPeriod + stim.actPeriod);
-    if fusi_Nframes_sess > nExpected
-        fprintf('  Trimming %d -> %d frames (discarding %d extra)\n', ...
-            fusi_Nframes_sess, nExpected, fusi_Nframes_sess - nExpected);
-        DopSess = DopSess(:, :, 1:nExpected);
-        fusi_Nframes_sess = nExpected;
-    end
-
-    if doRot180_US, DopSess = rot90(DopSess, 2); end
-    if flipLR_US
-        for fi = 1:fusi_Nframes_sess, DopSess(:,:,fi) = fliplr(DopSess(:,:,fi)); end
-    end
-    if flipUD_US
-        for fi = 1:fusi_Nframes_sess, DopSess(:,:,fi) = flipud(DopSess(:,:,fi)); end
-    end
-    clear SP SeqParamPath
-
-    % Build stim pattern for this session
-    stimPattern_sess = -ones(1, fusi_Nframes_sess);
-    stimOn_sess = (0:stim.numAct-1)' .* (stim.restPeriod + stim.actPeriod) + stim.restPeriod + (1:stim.actPeriod);
-    stimOn_sess = stimOn_sess(:);
-    stimOn_sess(stimOn_sess > fusi_Nframes_sess) = [];
-    stimPattern_sess(stimOn_sess) = 1;
-    if stim.stimFirst, stimPattern_sess = -stimPattern_sess; end
-    stimPatternNorm_sess = (stimPattern_sess - mean(stimPattern_sess)) ./ std(stimPattern_sess, 1);
-
-    % ---- Resample fUSI (display frame from this session) ----
-    fprintf('  Resampling fUSI onto output grid...\n');
-    fusi_Nframes_s = size(DopSess, 3);
-    if fusiFrameIdx == 0
-        dopFrame = mean(DopSess, 3);
-    else
-        dopFrame = DopSess(:, :, min(fusiFrameIdx, fusi_Nframes_s));
-    end
-
-    [Xf, Zf] = meshgrid(fusi_xaxis_mm, fusi_zaxis_mm);
-    fusiResampled = interp2(Xf, Zf, dopFrame, X_OUT, Z_OUT, 'linear', NaN);
-    fusiMask = ~isnan(fusiResampled) & Z_OUT >= 0;
-
-    fusiNorm = fusiResampled;
-    fusiNorm(~fusiMask) = 0;
-    vpF = fusiMask;
-    if any(vpF(:))
-        fusiNorm = sqrt(abs(fusiNorm));
-        lo = min(fusiNorm(vpF)); hi = max(fusiNorm(vpF));
-        if hi > lo, fusiNorm = (fusiNorm - lo) / (hi - lo); end
-    end
-    fusiNorm(~fusiMask) = 0;
-
-    % ---- Compute activation map for this session ----
-    fprintf('  Computing activation map...\n');
-    DopSmooth = DopSess;
-    if stim.isSmooth
-        fprintf('    Spatial smoothing (kernel=%d)...\n', stim.smoothN);
-        for t = 1:fusi_Nframes_s
-            DopSmooth(:,:,t) = imfilter(DopSmooth(:,:,t), ones(stim.smoothN)/stim.smoothN^2);
-        end
-    end
-
-    dopMeanAll = mean(DopSmooth, 3, 'omitnan');
-    stdDopAll  = std(DopSmooth, 1, 3, 'omitnan');
-    stdDopAll(stdDopAll == 0) = 1;
-    dopNormAll = (DopSmooth - dopMeanAll) ./ stdDopAll;
-
-    ActMap_sess = zeros(fusi_Nz, fusi_Nx);
-    for i = 1:fusi_Nz
-        for ii = 1:fusi_Nx
-            tmp = corrcoef(squeeze(dopNormAll(i, ii, :)), stimPatternNorm_sess(:));
-            ActMap_sess(i, ii) = tmp(1, 2);
-        end
-    end
-    actThreshold_sess = stim.zscore * std(ActMap_sess(:), 'omitnan') + mean(ActMap_sess(:), 'omitnan');
-    actSigMaskNative_sess = ActMap_sess > actThreshold_sess;
-
-    % Resample activation onto output grid
-    actResampled = interp2(Xf, Zf, ActMap_sess, X_OUT, Z_OUT, 'linear', NaN);
-    actSigResampled = interp2(Xf, Zf, double(actSigMaskNative_sess), X_OUT, Z_OUT, 'nearest', 0) > 0.5;
-    actMaskGrid = ~isnan(actResampled) & Z_OUT >= 0;
-
-    actNormGrid = actResampled;
-    actNormGrid(actNormGrid < 0) = 0;
-    actNormGrid(~actMaskGrid) = 0;
-    hiAct = max(actNormGrid(:));
-    if hiAct > 0, actNormGrid = actNormGrid / hiAct; end
-
-    corrRawGrid = actResampled;
-    corrRawGrid(~actMaskGrid) = 0;
-
-    fprintf('  Activation map: %d significant pixels\n', sum(actSigMaskNative_sess(:)));
-    clear DopSmooth dopNormAll dopMeanAll stdDopAll dopFrame fusiResampled actResampled
 
     % ---- Store this session's data ----
     sess(iSess).bmResampled  = bmResampled;
@@ -587,7 +722,6 @@ for iSess = 1:nSessions
     sess(iSess).ActMap       = ActMap_sess;
     sess(iSess).actThreshold = actThreshold_sess;
     sess(iSess).stimPatternNorm = stimPatternNorm_sess;
-    sess(iSess).fusiDir      = sd.fusiDir;   % keep path for saving alignment
     sess(iSess).bm_dx_init   = bm_dx_init;   % default; overridden below if saved
     sess(iSess).bm_dz_init   = bm_dz_init;
     sess(iSess).bm_rot_init  = bm_rot_init;
@@ -596,10 +730,26 @@ for iSess = 1:nSessions
     sess(iSess).roiIsManual  = false;
     sess(iSess).savedCurrentIdx = [];
 
+    % Alignment file. With fUSI on it lives in the fUSI folder, as before. With fUSI
+    % off it lives next to the B-mode file (one file per B-mode capture). When fUSI is
+    % on and the fUSI folder has none yet, an alignment saved by a B-mode-only run is used.
+    bmAlignFile = fullfile(sd.bMDir, ['bmode_alignment_' sd.bMFile '.mat']);
+    if fUSI
+        alignFile = fullfile(sd.fusiDir, 'bmode_alignment.mat');
+        if isfile(alignFile)
+            loadAlignFile = alignFile;
+        else
+            loadAlignFile = bmAlignFile;
+        end
+    else
+        alignFile = bmAlignFile;
+        loadAlignFile = bmAlignFile;
+    end
+    sess(iSess).alignFile = alignFile;   % where this session's alignment is saved
+
     % Load saved alignment from disk if available
-    alignFile = fullfile(sd.fusiDir, 'bmode_alignment.mat');
-    if exist(alignFile, 'file')
-        saved = load(alignFile);
+    if isfile(loadAlignFile)
+        saved = load(loadAlignFile);
         if isfield(saved, 'bm_dx'),   sess(iSess).bm_dx_init  = saved.bm_dx;   end
         if isfield(saved, 'bm_dz'),   sess(iSess).bm_dz_init  = saved.bm_dz;   end
         if isfield(saved, 'bm_rot'),  sess(iSess).bm_rot_init = saved.bm_rot;  end
@@ -615,10 +765,14 @@ end
 fprintf('\nAll %d sessions loaded.\n', nSessions);
 
 % Session 1 frame count (used by Intan alignment below)
-fusi_Nframes = size(sess(1).DopAll, 3);
+if fUSI
+    fusi_Nframes = size(sess(1).DopAll, 3);
+else
+    fusi_Nframes = 0;
+end
 
 %% ===================== LOAD INTAN EEG + ACCEL (OPTIONAL) =====================
-hasIntan = ~isempty(intanPath) && ~isempty(intanBaseName);
+hasIntan = fUSI && ~isempty(intanPath) && ~isempty(intanBaseName);
 if hasIntan
     fprintf('Loading Intan EEG + analog data from %s...\n', intanPath);
     [eegCollect, eegCollectRaw, digTrigFull, analogFull] = concatIntanFUSILights(intanPath, intanBaseName);
@@ -698,7 +852,9 @@ if hasIntan
     % Check if EEG data was found
     hasEeg = ~isempty(eegCollect) && ~isempty(eegCollect{1});
 else
-    fprintf('No Intan data path specified, skipping EEG/accel loading.\n');
+    if fUSI
+        fprintf('No Intan data path specified, skipping EEG/accel loading.\n');
+    end
     eegCollect     = {};
     eegCollectRaw  = {};
     digTrigFull    = [];
@@ -739,6 +895,12 @@ as.nAligned       = nAligned;
 as.intanFs        = intanFs;
 as.trigEpochInfo   = trigEpochInfo;
 as.tmpYimg        = tmpYimg;
+% Sagittal plane browsing (Left/Right keys): keep the MRI volume so any plane can be shown
+[~, sagCenterIdx] = min(abs(sys.ux));
+as.sagVol         = sys.aImg;                  % [Nx x Ny x Nz]; plane ix is aImg(ix,:,:)
+as.sagUx_mm       = sys.ux(:)' * 1e3;          % lateral position of each plane (mm)
+as.sagIdx         = sagCenterIdx;              % start on the midline plane
+as.sagStepVox     = max(1, round(1 / dx_mri_mm));   % planes per key press (about 1 mm); Shift = 1 plane
 as.beamOverlay    = beamOverlay;
 as.sagFacePos     = sagFacePos;
 as.sagSysUy_mm    = sagSysUy_mm;
@@ -772,6 +934,8 @@ clear beamOverlay tmpYimg
 ud = struct();
 ud.animalStore   = animalStore;
 ud.currentAnimal = 1;
+ud.saveDir       = saveDir;   % local functions can't see script variables
+ud.fUSI          = fUSI;      % false = B-mode / MRI alignment only
 
 % Shared display settings
 ud.fusiAlpha        = fusiAlpha;
@@ -830,6 +994,10 @@ function ud = loadAnimalIntoUd(ud, animalIdx)
     ud.intanFs      = as.intanFs;
     ud.trigEpochInfo = as.trigEpochInfo;
     ud.tmpYimg      = as.tmpYimg;
+    ud.sagVol       = as.sagVol;
+    ud.sagUx_mm     = as.sagUx_mm;
+    ud.sagIdx       = as.sagIdx;
+    ud.sagStepVox   = as.sagStepVox;
     ud.beamOverlay  = as.beamOverlay;
     ud.sagFacePos   = as.sagFacePos;
     ud.sagSysUy_mm  = as.sagSysUy_mm;
@@ -901,6 +1069,7 @@ function ud = saveAnimalState(ud)
     % Save which session was active
     ud.animalStore{idx}.currentSession = ud.currentSession;
     ud.animalStore{idx}.defaultAngle   = ud.angles(ud.currentIdx);
+    ud.animalStore{idx}.sagIdx         = ud.sagIdx;
 
     % Persist alignment to disk
     saveAlignmentToDisk(ud.animalStore{idx}.sessions(si));
@@ -908,8 +1077,8 @@ end
 
 %% ===================== PERSIST ALIGNMENT TO DISK =====================
 function saveAlignmentToDisk(sessStruct)
-    if ~isfield(sessStruct, 'fusiDir') || isempty(sessStruct.fusiDir), return; end
-    alignFile = fullfile(sessStruct.fusiDir, 'bmode_alignment.mat');
+    if ~isfield(sessStruct, 'alignFile') || isempty(sessStruct.alignFile), return; end
+    alignFile = sessStruct.alignFile;
     bm_dx = sessStruct.bm_dx_init; %#ok<NASGU>
     bm_dz = sessStruct.bm_dz_init; %#ok<NASGU>
     bm_rot = sessStruct.bm_rot_init; %#ok<NASGU>
@@ -964,7 +1133,9 @@ function updateDisplay(fig)
     fZ = ud.sagFacePos(ai,2);
     % Offset: shift all Y coords so the transducer face is at x = 0
     yOff = fY;
-    imagesc(ax0, ud.sagSysUy_mm - yOff, ud.sagSysUz_mm, ud.tmpYimg);
+    sagImg = squeeze(ud.sagVol(ud.sagIdx, :, :)).';           % [Nz x Ny] sagittal plane
+    sagImg(end-5:end, end-9:end) = max(sagImg(:));            % reference marker (as before)
+    imagesc(ax0, ud.sagSysUy_mm - yOff, ud.sagSysUz_mm, sagImg);
     colormap(ax0, gray); hold(ax0, 'on');
     % Transducer face patch (fY - yOff = 0)
     perpDir = [cos(theta_rad), sin(theta_rad)];
@@ -1002,40 +1173,45 @@ function updateDisplay(fig)
     axis(ax0, 'image'); whiteAxis(ax0);
     ylim(ax0, [-40 60]);
     xlabel(ax0, 'Distance from face (mm)'); ylabel(ax0, 'Depth from face (mm)');
-    title(ax0, sprintf('Beam Path (%.1f\\circ)  [range: %.1f\\circ-%.1f\\circ]', ...
-        ang, ud.angleRange(1), ud.angleRange(2)), 'Color', 'w');
+    title(ax0, {sprintf('Beam Path (%.1f\\circ)  [range: %.1f\\circ-%.1f\\circ]', ...
+        ang, ud.angleRange(1), ud.angleRange(2)), ...
+        sprintf('Sagittal plane x = %+.1f mm (beam at x = 0)', ud.sagUx_mm(ud.sagIdx))}, 'Color', 'w');
  
     if ud.bm_rot_deg ~= 0
         bmNorm   = imrotate(ud.bmNorm, ud.bm_rot_deg, 'bilinear', 'crop');
         mask     = imrotate(double(ud.sectorMask), ud.bm_rot_deg, 'nearest', 'crop') > 0.5;
         bmDisp   = imrotate(ud.bmResampled, ud.bm_rot_deg, 'bilinear', 'crop');
         bmDisp(isnan(bmDisp)) = 0;
-        fusiNorm = imrotate(ud.fusiNorm, ud.bm_rot_deg, 'bilinear', 'crop');
-        fusiMask = imrotate(double(ud.fusiMask), ud.bm_rot_deg, 'nearest', 'crop') > 0.5;
-        actNorm    = imrotate(ud.actNorm, ud.bm_rot_deg, 'bilinear', 'crop');
-        corrRaw    = imrotate(ud.corrRawGrid, ud.bm_rot_deg, 'bilinear', 'crop');
-        actSigMask = imrotate(double(ud.actSigMask), ud.bm_rot_deg, 'nearest', 'crop') > 0.5;
-        actMask    = imrotate(double(ud.actMask), ud.bm_rot_deg, 'nearest', 'crop') > 0.5;
-        if ~isempty(ud.roiResampled)
-            if ud.roiIsManual
-                roiResamp = ud.roiResampled;  % already in rotated frame
+        if ud.fUSI
+            fusiNorm = imrotate(ud.fusiNorm, ud.bm_rot_deg, 'bilinear', 'crop');
+            fusiMask = imrotate(double(ud.fusiMask), ud.bm_rot_deg, 'nearest', 'crop') > 0.5;
+            actNorm    = imrotate(ud.actNorm, ud.bm_rot_deg, 'bilinear', 'crop');
+            corrRaw    = imrotate(ud.corrRawGrid, ud.bm_rot_deg, 'bilinear', 'crop');
+            actSigMask = imrotate(double(ud.actSigMask), ud.bm_rot_deg, 'nearest', 'crop') > 0.5;
+            actMask    = imrotate(double(ud.actMask), ud.bm_rot_deg, 'nearest', 'crop') > 0.5;
+            if ~isempty(ud.roiResampled)
+                if ud.roiIsManual
+                    roiResamp = ud.roiResampled;  % already in rotated frame
+                else
+                    roiResamp = imrotate(double(ud.roiResampled), ud.bm_rot_deg, 'nearest', 'crop') > 0.5;
+                end
             else
-                roiResamp = imrotate(double(ud.roiResampled), ud.bm_rot_deg, 'nearest', 'crop') > 0.5;
+                roiResamp = [];
             end
-        else
-            roiResamp = [];
         end
     else
         bmNorm   = ud.bmNorm;
         mask     = ud.sectorMask;
         bmDisp   = ud.bmResampled; bmDisp(isnan(bmDisp)) = 0;
-        fusiNorm = ud.fusiNorm;
-        fusiMask = ud.fusiMask;
-        actNorm    = ud.actNorm;
-        corrRaw    = ud.corrRawGrid;
-        actSigMask = ud.actSigMask;
-        actMask    = ud.actMask;
-        roiResamp  = ud.roiResampled;
+        if ud.fUSI
+            fusiNorm = ud.fusiNorm;
+            fusiMask = ud.fusiMask;
+            actNorm    = ud.actNorm;
+            corrRaw    = ud.corrRawGrid;
+            actSigMask = ud.actSigMask;
+            actMask    = ud.actMask;
+            roiResamp  = ud.roiResampled;
+        end
     end
  
     overlayState = ud.overlayState;  % 0=Doppler, 1=Activation, 2=Correlation
@@ -1084,7 +1260,11 @@ function updateDisplay(fig)
     title(ax2, 'B-mode (adjusted)', 'Color', 'w');
  
     % --- Panel 3: B-mode / MRI overlay ---
-    ax3 = nexttile(tl, 7, [1 2]);
+    if ud.fUSI
+        ax3 = nexttile(tl, 7, [1 2]);
+    else
+        ax3 = nexttile(tl, 8, [1 4]);   % no fUSI panels: give the B-mode / MRI overlay the whole bottom row
+    end
     imagesc(ax3, ud.x_out_mm, ud.z_out_mm, mrNorm);
     colormap(ax3, gray); hold(ax3, 'on');
     switch ud.overlayMode
@@ -1113,134 +1293,136 @@ function updateDisplay(fig)
     adjStr = sprintf('dx=%.1f  dz=%.1f mm  rot=%.1f', ud.bm_dx_mm, ud.bm_dz_mm, ud.bm_rot_deg);
     title(ax3, sprintf('B-mode overlay (%.1f\\circ) | %s', ang, adjStr), 'Color', 'w');
  
-    % --- Panel 4: B-mode + fUSI/Activation overlay ---
-    ax4 = nexttile(tl, 9, [1 2]);
-    ax4.Tag = 'fusi_panel';
-    imagesc(ax4, bm_x, bm_z, bmDisp);
-    colormap(ax4, gray); hold(ax4, 'on');
+    if ud.fUSI
+        % --- Panel 4: B-mode + fUSI/Activation overlay ---
+        ax4 = nexttile(tl, 9, [1 2]);
+        ax4.Tag = 'fusi_panel';
+        imagesc(ax4, bm_x, bm_z, bmDisp);
+        colormap(ax4, gray); hold(ax4, 'on');
  
-    if overlayState == 1
-        % Significant activation over B-mode
-        act_cmap = hot(256);
-        aIdx = max(1, min(256, round(actNorm * 255) + 1));
-        aRGB = ind2rgb(aIdx, act_cmap);
-        aAlpha = double(actSigMask) .* 0.8;
-        hAct = image(ax4, bm_x, bm_z, aRGB);
-        hAct.AlphaData = aAlpha;
-        % ROI outline
-        if any(roiResamp(:))
-            [B_roi, ~] = bwboundaries(roiResamp);
-            for k = 1:length(B_roi)
-                bnd = B_roi{k};
-                bnd_x = interp1(1:length(ud.x_out_mm), ud.x_out_mm, bnd(:,2), 'linear', 'extrap') + ud.bm_dx_mm;
-                bnd_z = interp1(1:length(ud.z_out_mm), ud.z_out_mm, bnd(:,1), 'linear', 'extrap') + ud.bm_dz_mm;
-                plot(ax4, bnd_x, bnd_z, 'g-', 'LineWidth', 1.5);
+        if overlayState == 1
+            % Significant activation over B-mode
+            act_cmap = hot(256);
+            aIdx = max(1, min(256, round(actNorm * 255) + 1));
+            aRGB = ind2rgb(aIdx, act_cmap);
+            aAlpha = double(actSigMask) .* 0.8;
+            hAct = image(ax4, bm_x, bm_z, aRGB);
+            hAct.AlphaData = aAlpha;
+            % ROI outline
+            if any(roiResamp(:))
+                [B_roi, ~] = bwboundaries(roiResamp);
+                for k = 1:length(B_roi)
+                    bnd = B_roi{k};
+                    bnd_x = interp1(1:length(ud.x_out_mm), ud.x_out_mm, bnd(:,2), 'linear', 'extrap') + ud.bm_dx_mm;
+                    bnd_z = interp1(1:length(ud.z_out_mm), ud.z_out_mm, bnd(:,1), 'linear', 'extrap') + ud.bm_dz_mm;
+                    plot(ax4, bnd_x, bnd_z, 'g-', 'LineWidth', 1.5);
+                end
+            end
+            title(ax4, 'B-mode + Activation', 'Color', 'w');
+        elseif overlayState == 2
+            % Full correlation map over B-mode (diverging blue-white-red)
+            nC = 256;
+            halfN = nC / 2;
+            blue2white = [linspace(0,1,halfN)', linspace(0,1,halfN)', ones(halfN,1)];
+            white2red  = [ones(halfN,1), linspace(1,0,halfN)', linspace(1,0,halfN)'];
+            divCmap = [blue2white; white2red];
+            cLim = max(abs(corrRaw(actMask)));
+            if cLim == 0, cLim = 1; end
+            corrScaled = (corrRaw / cLim + 1) / 2;  % map [-cLim,cLim] to [0,1]
+            cIdx = max(1, min(nC, round(corrScaled * (nC - 1)) + 1));
+            cRGB = ind2rgb(cIdx, divCmap);
+            cAlpha = double(actMask) .* 0.7;
+            hCorr = image(ax4, bm_x, bm_z, cRGB);
+            hCorr.AlphaData = cAlpha;
+            title(ax4, sprintf('B-mode + Correlation (r: %.2f to %.2f)', -cLim, cLim), 'Color', 'w');
+        else
+            % Doppler over B-mode
+            fusi_cmap = feval(ud.fusiColormap, 256);
+            fIdx = max(1, min(256, round(fusiNorm * 255) + 1));
+            fRGB = ind2rgb(fIdx, fusi_cmap);
+            fAlpha = double(fusiMask) .* ud.fusiAlpha .* (fusiNorm .^ 0.6);
+            hFbm = image(ax4, bm_x, bm_z, fRGB);
+            hFbm.AlphaData = fAlpha;
+            title(ax4, 'B-mode + fUSI', 'Color', 'w');
+        end
+ 
+        hold(ax4, 'off');
+        axis(ax4, 'image'); whiteAxis(ax4);
+        xlim(ax4, xLim);
+        ylim(ax4, yLim);
+        xlabel(ax4, 'Distance from midline (mm)'); ylabel(ax4, 'Depth (mm)');
+ 
+        % --- Panel 5: fUSI/Activation / MRI overlay ---
+        ax5 = nexttile(tl, 11, [1 2]);
+        imagesc(ax5, ud.x_out_mm, ud.z_out_mm, mrNorm);
+        colormap(ax5, gray); hold(ax5, 'on');
+ 
+        if overlayState == 1
+            % Significant activation over MRI
+            act_cmap = hot(256);
+            aIdx = max(1, min(256, round(actNorm * 255) + 1));
+            aRGB = ind2rgb(aIdx, act_cmap);
+            aAlpha = double(actSigMask) .* 0.8;
+            hAct2 = image(ax5, bm_x, bm_z, aRGB);
+            hAct2.AlphaData = aAlpha;
+            % ROI outline
+            if any(roiResamp(:))
+                [B_roi, ~] = bwboundaries(roiResamp);
+                for k = 1:length(B_roi)
+                    bnd = B_roi{k};
+                    bnd_x = interp1(1:length(ud.x_out_mm), ud.x_out_mm, bnd(:,2), 'linear', 'extrap') + ud.bm_dx_mm;
+                    bnd_z = interp1(1:length(ud.z_out_mm), ud.z_out_mm, bnd(:,1), 'linear', 'extrap') + ud.bm_dz_mm;
+                    plot(ax5, bnd_x, bnd_z, 'g-', 'LineWidth', 1.5);
+                end
+            end
+            overlayLabel = 'Activation';
+        elseif overlayState == 2
+            % Full correlation map over MRI (diverging blue-white-red)
+            nC = 256;
+            halfN = nC / 2;
+            blue2white = [linspace(0,1,halfN)', linspace(0,1,halfN)', ones(halfN,1)];
+            white2red  = [ones(halfN,1), linspace(1,0,halfN)', linspace(1,0,halfN)'];
+            divCmap = [blue2white; white2red];
+            cLim = max(abs(corrRaw(actMask)));
+            if cLim == 0, cLim = 1; end
+            corrScaled = (corrRaw / cLim + 1) / 2;
+            cIdx = max(1, min(nC, round(corrScaled * (nC - 1)) + 1));
+            cRGB = ind2rgb(cIdx, divCmap);
+            cAlpha = double(actMask) .* 0.7;
+            hCorr2 = image(ax5, bm_x, bm_z, cRGB);
+            hCorr2.AlphaData = cAlpha;
+            overlayLabel = sprintf('Correlation (r: %.2f to %.2f)', -cLim, cLim);
+        else
+            % Doppler over MRI
+            fusi_cmap = feval(ud.fusiColormap, 256);
+            fIdx = max(1, min(256, round(fusiNorm * 255) + 1));
+            fRGB = ind2rgb(fIdx, fusi_cmap);
+            fAlpha = double(fusiMask) .* ud.fusiAlpha .* (fusiNorm .^ 0.6);
+            hF = image(ax5, bm_x, bm_z, fRGB);
+            hF.AlphaData = fAlpha;
+            overlayLabel = 'fUSI';
+        end
+ 
+        if ud.hasLGN
+            lgn = ud.lgnSlices{ai}; lgn(isnan(lgn)) = 0;
+            lgnMax = max(lgn(:));
+            if lgnMax > 0
+                lgnNorm = lgn / lgnMax;
+                lgnIdx = max(1, min(256, round(lgnNorm * 255) + 1));
+                hLGN2 = image(ax5, ud.x_out_mm, ud.z_out_mm, ind2rgb(lgnIdx, winter(256)));
+                hLGN2.AlphaData = double(lgnNorm > 0.1) * 0.6;
             end
         end
-        title(ax4, 'B-mode + Activation', 'Color', 'w');
-    elseif overlayState == 2
-        % Full correlation map over B-mode (diverging blue-white-red)
-        nC = 256;
-        halfN = nC / 2;
-        blue2white = [linspace(0,1,halfN)', linspace(0,1,halfN)', ones(halfN,1)];
-        white2red  = [ones(halfN,1), linspace(1,0,halfN)', linspace(1,0,halfN)'];
-        divCmap = [blue2white; white2red];
-        cLim = max(abs(corrRaw(actMask)));
-        if cLim == 0, cLim = 1; end
-        corrScaled = (corrRaw / cLim + 1) / 2;  % map [-cLim,cLim] to [0,1]
-        cIdx = max(1, min(nC, round(corrScaled * (nC - 1)) + 1));
-        cRGB = ind2rgb(cIdx, divCmap);
-        cAlpha = double(actMask) .* 0.7;
-        hCorr = image(ax4, bm_x, bm_z, cRGB);
-        hCorr.AlphaData = cAlpha;
-        title(ax4, sprintf('B-mode + Correlation (r: %.2f to %.2f)', -cLim, cLim), 'Color', 'w');
-    else
-        % Doppler over B-mode
-        fusi_cmap = feval(ud.fusiColormap, 256);
-        fIdx = max(1, min(256, round(fusiNorm * 255) + 1));
-        fRGB = ind2rgb(fIdx, fusi_cmap);
-        fAlpha = double(fusiMask) .* ud.fusiAlpha .* (fusiNorm .^ 0.6);
-        hFbm = image(ax4, bm_x, bm_z, fRGB);
-        hFbm.AlphaData = fAlpha;
-        title(ax4, 'B-mode + fUSI', 'Color', 'w');
-    end
- 
-    hold(ax4, 'off');
-    axis(ax4, 'image'); whiteAxis(ax4);
-    xlim(ax4, xLim);
-    ylim(ax4, yLim);
-    xlabel(ax4, 'Distance from midline (mm)'); ylabel(ax4, 'Depth (mm)');
- 
-    % --- Panel 5: fUSI/Activation / MRI overlay ---
-    ax5 = nexttile(tl, 11, [1 2]);
-    imagesc(ax5, ud.x_out_mm, ud.z_out_mm, mrNorm);
-    colormap(ax5, gray); hold(ax5, 'on');
- 
-    if overlayState == 1
-        % Significant activation over MRI
-        act_cmap = hot(256);
-        aIdx = max(1, min(256, round(actNorm * 255) + 1));
-        aRGB = ind2rgb(aIdx, act_cmap);
-        aAlpha = double(actSigMask) .* 0.8;
-        hAct2 = image(ax5, bm_x, bm_z, aRGB);
-        hAct2.AlphaData = aAlpha;
-        % ROI outline
-        if any(roiResamp(:))
-            [B_roi, ~] = bwboundaries(roiResamp);
-            for k = 1:length(B_roi)
-                bnd = B_roi{k};
-                bnd_x = interp1(1:length(ud.x_out_mm), ud.x_out_mm, bnd(:,2), 'linear', 'extrap') + ud.bm_dx_mm;
-                bnd_z = interp1(1:length(ud.z_out_mm), ud.z_out_mm, bnd(:,1), 'linear', 'extrap') + ud.bm_dz_mm;
-                plot(ax5, bnd_x, bnd_z, 'g-', 'LineWidth', 1.5);
-            end
-        end
-        overlayLabel = 'Activation';
-    elseif overlayState == 2
-        % Full correlation map over MRI (diverging blue-white-red)
-        nC = 256;
-        halfN = nC / 2;
-        blue2white = [linspace(0,1,halfN)', linspace(0,1,halfN)', ones(halfN,1)];
-        white2red  = [ones(halfN,1), linspace(1,0,halfN)', linspace(1,0,halfN)'];
-        divCmap = [blue2white; white2red];
-        cLim = max(abs(corrRaw(actMask)));
-        if cLim == 0, cLim = 1; end
-        corrScaled = (corrRaw / cLim + 1) / 2;
-        cIdx = max(1, min(nC, round(corrScaled * (nC - 1)) + 1));
-        cRGB = ind2rgb(cIdx, divCmap);
-        cAlpha = double(actMask) .* 0.7;
-        hCorr2 = image(ax5, bm_x, bm_z, cRGB);
-        hCorr2.AlphaData = cAlpha;
-        overlayLabel = sprintf('Correlation (r: %.2f to %.2f)', -cLim, cLim);
-    else
-        % Doppler over MRI
-        fusi_cmap = feval(ud.fusiColormap, 256);
-        fIdx = max(1, min(256, round(fusiNorm * 255) + 1));
-        fRGB = ind2rgb(fIdx, fusi_cmap);
-        fAlpha = double(fusiMask) .* ud.fusiAlpha .* (fusiNorm .^ 0.6);
-        hF = image(ax5, bm_x, bm_z, fRGB);
-        hF.AlphaData = fAlpha;
-        overlayLabel = 'fUSI';
-    end
- 
-    if ud.hasLGN
-        lgn = ud.lgnSlices{ai}; lgn(isnan(lgn)) = 0;
-        lgnMax = max(lgn(:));
-        if lgnMax > 0
-            lgnNorm = lgn / lgnMax;
-            lgnIdx = max(1, min(256, round(lgnNorm * 255) + 1));
-            hLGN2 = image(ax5, ud.x_out_mm, ud.z_out_mm, ind2rgb(lgnIdx, winter(256)));
-            hLGN2.AlphaData = double(lgnNorm > 0.1) * 0.6;
-        end
-    end
-    hold(ax5, 'off');
-    axis(ax5, 'image'); whiteAxis(ax5);
-    xlim(ax5, xLim);
-    ylim(ax5, yLim);
-    xlabel(ax5, 'Distance from midline (mm)'); ylabel(ax5, 'Depth (mm)');
-    title(ax5, sprintf('%s / MRI (%.1f\\circ) | %s', overlayLabel, ang, adjStr), 'Color', 'w');
+        hold(ax5, 'off');
+        axis(ax5, 'image'); whiteAxis(ax5);
+        xlim(ax5, xLim);
+        ylim(ax5, yLim);
+        xlabel(ax5, 'Distance from midline (mm)'); ylabel(ax5, 'Depth (mm)');
+        title(ax5, sprintf('%s / MRI (%.1f\\circ) | %s', overlayLabel, ang, adjStr), 'Color', 'w');
+    end  % if ud.fUSI
  
     % Store ax4 handle for use by runFusiAnalysis
-    ud.ax4Handle = ax4;
+    if ud.fUSI, ud.ax4Handle = ax4; end
     fig.UserData = ud;
 end
  
@@ -1268,7 +1450,7 @@ function savePanelsPDF(fig)
     ud = fig.UserData;
     ang = ud.angles(ud.currentIdx);
 
-    baseDir = saveDir;
+    baseDir = ud.saveDir;
     dateFolder = datestr(now, 'yyyy-mm-dd');
     outDir = fullfile(baseDir, dateFolder);
     if ~exist(outDir, 'dir'), mkdir(outDir); end
@@ -1307,6 +1489,11 @@ function savePanelsPDF(fig)
     end
 
     fprintf('=== All panels saved for %s at %.1f deg to %s ===\n\n', ud.subject, ang, outDir);
+
+    if ~ud.fUSI
+        fprintf('fUSI is off, so the correlation/activation figures and the analysis were skipped.\n');
+        return
+    end
 
     % --- Standalone MRI overlay figures ---
     ai = ud.currentIdx;
@@ -1486,7 +1673,7 @@ end
 function exportCrossAnimalPDF(fig)
     ud = fig.UserData;
 
-    baseDir = saveDir;
+    baseDir = ud.saveDir;
     dateFolder = datestr(now, 'yyyy-mm-dd');
     outDir = fullfile(baseDir, dateFolder);
     if ~exist(outDir, 'dir'), mkdir(outDir); end
@@ -1818,6 +2005,14 @@ function buildControlPanel(fig)
         'Reset alignment', @(~,~) resetAlignment(fig), neutral, 'button', 'on', 'Move the ultrasound image back to its starting position'
         };
 
+    if ~ud.fUSI
+        % B-mode / MRI alignment only: drop everything that needs fUSI data
+        fusiOnly = {'Analysis', 'Run analysis', 'Draw ROI and analyze', 'View', ...
+                    overlayLabels{stateIdx}, 'Activation on MRI', 'Combine sessions', ...
+                    'Compare animals', 'Export both animals'};
+        rows = rows(~ismember(rows(:, 1), fusiOnly), :);
+    end
+
     labelH = 0.026;
     btnH = 0.044;
     gap = 0.005;
@@ -1851,9 +2046,9 @@ function buildControlPanel(fig)
     end
 
     uicontrol(pnl, 'Style', 'text', ...
-        'String', {'Arrow keys: beam angle', 'W A S D: move image', 'R / E: rotate', 'Shift: smaller steps'}, ...
+        'String', {'Up / Down: beam angle', 'Left / Right: sagittal plane', 'W A S D: move image', 'R / E: rotate', 'Shift: smaller steps'}, ...
         'Units', 'normalized', ...
-        'Position', [0.06 0.012 0.88 0.16], ...
+        'Position', [0.06 0.012 0.88 0.19], ...
         'BackgroundColor', pnl.BackgroundColor, ...
         'ForegroundColor', [0.78 0.78 0.78], ...
         'HorizontalAlignment', 'left', ...
@@ -1919,14 +2114,33 @@ function keyHandler(src, evt)
     tStep = 0.1 + 0.4 * ~isShift;
     rStep = 0.2 + 0.8 * ~isShift;
  
+    if ~ud.fUSI && any(strcmp(evt.Key, {'p', 'm', 'f', 'g', 'c'}))
+        fprintf('fUSI is off (fUSI = false in INPUTS), so ''%s'' does nothing.\n', evt.Key);
+        return
+    end
+
     redraw = true;
+    saveAlign = true;   % false for keys that don't change the alignment
     switch evt.Key
-        case 'rightarrow'
+        case 'uparrow'          % beam angle +
             if ud.currentIdx < length(ud.angles), ud.currentIdx = ud.currentIdx + 1;
             else, redraw = false; end
-        case 'leftarrow'
+        case 'downarrow'        % beam angle -
             if ud.currentIdx > 1, ud.currentIdx = ud.currentIdx - 1;
             else, redraw = false; end
+
+        case {'rightarrow', 'leftarrow'}   % step through sagittal planes
+            saveAlign = false;
+            if strcmp(evt.Key, 'rightarrow'), dirX = 1; else, dirX = -1; end
+            sgn = sign(ud.sagUx_mm(end) - ud.sagUx_mm(1));   % +1 if x increases with plane index
+            if sgn == 0, sgn = 1; end
+            if isShift, nStep = 1; else, nStep = ud.sagStepVox; end
+            newSag = min(max(ud.sagIdx + dirX * sgn * nStep, 1), numel(ud.sagUx_mm));
+            if newSag == ud.sagIdx
+                redraw = false;
+            else
+                ud.sagIdx = newSag;
+            end
  
         case 'w', ud.bm_dz_mm = ud.bm_dz_mm - tStep;
         case 's', ud.bm_dz_mm = ud.bm_dz_mm + tStep;
@@ -1979,7 +2193,10 @@ function keyHandler(src, evt)
         ud.animalStore{idx}.sessions(si).bm_dz_init     = ud.bm_dz_mm;
         ud.animalStore{idx}.sessions(si).bm_rot_init    = ud.bm_rot_deg;
         ud.animalStore{idx}.sessions(si).savedCurrentIdx = ud.currentIdx;
-        saveAlignmentToDisk(ud.animalStore{idx}.sessions(si));
+        ud.animalStore{idx}.sagIdx = ud.sagIdx;
+        if saveAlign
+            saveAlignmentToDisk(ud.animalStore{idx}.sessions(si));
+        end
 
         src.UserData = ud;
         updateDisplay(src);
@@ -2533,7 +2750,7 @@ function generateStandaloneActivationMap(fig)
     fprintf('\n=== Generating standalone figures (%s, %.1f deg) ===\n', ud.subject, ang);
 
     % --- Create output folder ---
-    baseDir = saveDir;
+    baseDir = ud.saveDir;
     dateFolder = datestr(now, 'yyyy-mm-dd');
     outDir = fullfile(baseDir, dateFolder);
     if ~exist(outDir, 'dir'), mkdir(outDir); end
@@ -3088,7 +3305,7 @@ function generateCombinedSessionFigure(fig)
     hold(ax, 'off');
 
     % Save
-    baseDir = saveDir;
+    baseDir = ud.saveDir;
     dateFolder = datestr(now, 'yyyy-mm-dd');
     outDir = fullfile(baseDir, dateFolder);
     if ~exist(outDir, 'dir'), mkdir(outDir); end
@@ -3572,4 +3789,16 @@ function IQf = SVDfilter(IQ, cutoff)
     V = X * U;
     Reconst = V(:, cutoff) * U(:, cutoff)';
     IQf = reshape(Reconst, initsize);
+end
+
+%% ===================== NORMALIZE MRI SLICE (0-1, NaN -> 0) =====================
+function mrN = normalizeMriSlice(mr)
+    mrN = mr; vpMR = ~isnan(mrN);
+    if any(vpMR(:))
+        lo = min(mrN(vpMR)); hi = max(mrN(vpMR));
+        if hi > lo, mrN = (mrN - lo) / (hi - lo); end
+        mrN(isnan(mrN)) = 0;
+    else
+        mrN = zeros(size(mr));
+    end
 end
